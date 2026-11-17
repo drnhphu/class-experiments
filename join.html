@@ -3,125 +3,333 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vào phòng thí nghiệm</title>
+  <title>Class experiments</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
-  <!-- Phase 0 student page: anonymous sign-in, join a room, write one test answer (T00). -->
+  <!-- Student page (phone, 360 px): join, consent, self-paced opening batch, games, quiz, personal results. -->
   <main class="mx-auto max-w-sm p-4 space-y-4">
-    <h1 class="text-xl font-semibold">Thí nghiệm trên lớp</h1>
-    <p id="status" class="text-sm text-slate-600">Đang kết nối…</p>
-
-    <section id="joinBox" class="hidden space-y-2">
-      <label for="roomInput" class="block text-sm font-medium">Mã phòng</label>
-      <input id="roomInput" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6"
-             class="w-full rounded-lg border border-slate-300 px-3 py-3 text-center text-2xl tracking-widest uppercase"
-             placeholder="ABC234">
-      <button id="joinBtn" class="w-full rounded-lg bg-slate-900 py-3 text-white font-medium disabled:opacity-40">Vào phòng</button>
-    </section>
-
-    <section id="roomBox" class="hidden space-y-3">
-      <p class="text-sm">Phòng <span id="roomLabel" class="font-mono font-semibold"></span></p>
-      <div class="rounded-xl bg-white p-4 shadow-sm space-y-3">
-        <p class="font-medium">Câu thử kết nối: chọn một số bất kỳ.</p>
-        <div id="choices" class="grid grid-cols-5 gap-2"></div>
-      </div>
-      <p id="sendMsg" class="text-sm"></p>
-    </section>
-
+    <header class="flex items-center justify-between">
+      <h1 id="title" class="text-lg font-semibold"></h1>
+      <span id="sync" class="text-xs text-slate-400"></span>
+    </header>
+    <p id="status" class="text-sm text-slate-600"></p>
+    <section id="view" class="space-y-4"></section>
     <p id="who" class="pt-6 text-xs text-slate-400"></p>
   </main>
 
   <script type="module">
     import {
       auth, db, configMissing, signInAnonymously, onAuthStateChanged,
-      doc, getDoc, setDoc, serverTimestamp
+      doc, getDoc, setDoc, updateDoc, onSnapshot, serverTimestamp, waitForPendingWrites
     } from "./js/firebase.js";
+    import { loadLang, makeT, pick, el } from "./js/i18n.js";
+    import { loadCatalog, loadConfig, loadEngine, loadQuiz } from "./js/catalog.js";
     import { ROOM_RE, normalizeRoomCode, responseId } from "./js/room.js";
+    import { parseStepKey, localStore, QUIZ_ID } from "./js/session.js";
 
-    const TEST_EXP = "T00"; // Phase 0 connectivity item; real experiments come from experiments/*.json later
     const $ = (id) => document.getElementById(id);
-    let roomCode = null;
-    let shownAt = 0;
+    const S = { lang: "vi", t: makeT({}), code: null, uid: null, session: null, catalog: null, catalogName: null,
+                store: null, viewKey: null, joinState: "unknown", busy: false };
+
+    async function setLang(lang) {
+      S.lang = lang === "en" ? "en" : "vi";
+      S.t = makeT(await loadLang(S.lang));
+      document.documentElement.lang = S.lang;
+      $("title").textContent = S.t("app.title");
+    }
 
     function setStatus(text, tone = "muted") {
       const tones = { muted: "text-slate-600", ok: "text-emerald-700", bad: "text-rose-700" };
       $("status").className = `text-sm ${tones[tone]}`;
-      $("status").textContent = text;
+      $("status").textContent = text || "";
     }
 
-    if (configMissing) {
-      setStatus("Chưa điền cấu hình Firebase trong js/firebase-config.js.", "bad");
-      throw new Error("Firebase config missing");
+    function show(key, build) {
+      if (S.viewKey === key) return;
+      S.viewKey = key;
+      const node = build();
+      $("view").replaceChildren(...(node ? [node] : []));
     }
+
+    // ---------- writes (queued offline by Firestore; we do not block the next screen on the server ack) ----------
+    function trackWrite(promise) {
+      $("sync").textContent = S.t("sync.pending");
+      promise.catch((e) => {
+        setStatus(e.code === "permission-denied" ? S.t("err.writeClosed") : `${S.t("err.write")} (${e.code || e.message})`, "bad");
+      });
+      waitForPendingWrites(db).then(() => { $("sync").textContent = S.t("sync.done"); }).catch(() => {});
+    }
+
+    function writeResponse(exp, answers, times) {
+      const payload = { uid: S.uid, exp, answers, updatedAt: serverTimestamp() };
+      if (times) payload.times = times;
+      if (S.session?.consent) payload.consent = S.store.get().consent ?? null;
+      trackWrite(setDoc(doc(db, "sessions", S.code, "responses", responseId(S.uid, exp)), payload, { merge: true }));
+      S.store.update((st) => {
+        st.answers = st.answers || {};
+        st.answers[exp] = { ...(st.answers[exp] || {}), ...answers };
+        return st;
+      });
+    }
+
+    function updateParticipant(fields) {
+      trackWrite(updateDoc(doc(db, "sessions", S.code, "participants", S.uid), fields));
+    }
+
+    // ---------- boot ----------
+    await setLang(new URLSearchParams(location.search).get("lang") || "vi");
+    if (configMissing) { setStatus(S.t("err.config"), "bad"); throw new Error("config"); }
+    setStatus(S.t("status.connecting"));
 
     onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        try { await signInAnonymously(auth); }
-        catch (e) { setStatus(`Không đăng nhập được (${e.code}).`, "bad"); }
+        try { await signInAnonymously(auth); } catch (e) { setStatus(`${S.t("err.signin")} (${e.code})`, "bad"); }
         return;
       }
-      $("who").textContent = `Mã ẩn danh của máy này: ${user.uid.slice(0, 6)}…`;
-      setStatus("Đã kết nối.", "ok");
-      $("joinBox").classList.remove("hidden");
+      if (S.uid) return;
+      S.uid = user.uid;
+      $("who").textContent = `${S.t("who.id")}: ${user.uid.slice(0, 6)}…`;
       const fromUrl = normalizeRoomCode(new URLSearchParams(location.search).get("room"));
-      if (ROOM_RE.test(fromUrl)) { $("roomInput").value = fromUrl; joinRoom(fromUrl); }
+      if (ROOM_RE.test(fromUrl)) enterRoom(fromUrl); else showEnter();
     });
 
-    $("joinBtn").addEventListener("click", () => joinRoom(normalizeRoomCode($("roomInput").value)));
+    function showEnter(prefill = "") {
+      setStatus("");
+      show("enter", () => {
+        const input = el("input", { maxlength: "6", autocomplete: "off", autocapitalize: "characters", value: prefill,
+          class: "w-full rounded-lg border border-slate-300 px-3 py-3 text-center text-2xl tracking-widest uppercase", placeholder: "ABC234" });
+        const btn = el("button", { class: "w-full rounded-lg bg-slate-900 py-3 font-medium text-white",
+          onclick: () => enterRoom(normalizeRoomCode(input.value)) }, S.t("join.button"));
+        return el("div", { class: "space-y-2" }, el("label", { class: "block text-sm font-medium" }, S.t("join.code")), input, btn);
+      });
+    }
 
-    async function joinRoom(code) {
-      if (!ROOM_RE.test(code)) { setStatus("Mã phòng gồm 6 ký tự.", "bad"); return; }
-      $("joinBtn").disabled = true;
+    async function enterRoom(code) {
+      if (!ROOM_RE.test(code)) { setStatus(S.t("join.badCode"), "bad"); return; }
       try {
         const snap = await getDoc(doc(db, "sessions", code));
-        if (!snap.exists()) { setStatus("Không tìm thấy phòng này.", "bad"); return; }
-        roomCode = code;
-        $("roomLabel").textContent = code;
-        $("joinBox").classList.add("hidden");
-        $("roomBox").classList.remove("hidden");
-        setStatus("Đã vào phòng.", "ok");
-        renderChoices();
-      } catch (e) {
-        setStatus(`Không vào được phòng (${e.code || e.message}).`, "bad");
-      } finally {
-        $("joinBtn").disabled = false;
+        if (!snap.exists()) { S.viewKey = null; showEnter(code); setStatus(S.t("join.notFound"), "bad"); return; }
+      } catch (e) { setStatus(`${S.t("join.error")} (${e.code || e.message})`, "bad"); return; }
+      S.code = code;
+      S.store = localStore(code, S.uid);
+      history.replaceState(null, "", `?room=${code}`);
+      onSnapshot(doc(db, "sessions", code), onSession, (e) => setStatus(`${S.t("join.error")} (${e.code})`, "bad"));
+    }
+
+    async function onSession(snap) {
+      const s = snap.data();
+      if (!s) return;
+      const langChanged = s.lang !== S.lang;
+      S.session = s;
+      if (langChanged) { await setLang(s.lang); S.viewKey = null; $("who").textContent = `${S.t("who.id")}: ${S.uid.slice(0, 6)}…`; }
+      if (S.catalogName !== s.catalog) { S.catalog = await loadCatalog(s.catalog || "main"); S.catalogName = s.catalog; }
+      await ensureJoined();
+      route();
+    }
+
+    // Create the participant record once. Offline: the write is queued, so we continue optimistically.
+    async function ensureJoined() {
+      const st = S.store.get();
+      if (st.joined) { S.joinState = "joined"; return; }
+      if (S.joinState === "pending" || S.joinState === "refused") return;
+      if (S.session.locked) return;
+      S.joinState = "pending";
+      const write = setDoc(doc(db, "sessions", S.code, "participants", S.uid), { joinedAt: serverTimestamp(), lang: S.session.lang });
+      const outcome = await Promise.race([write.then(() => "ok", (e) => e.code), new Promise((r) => setTimeout(() => r("timeout"), 8000))]);
+      // A refused create while the room still accepts people means the record already exists
+      // (same anonymous user, local storage cleared): treat as joined.
+      const alreadyThere = outcome === "permission-denied" && S.session.joinOpen && !S.session.locked;
+      if (outcome === "ok" || outcome === "timeout" || alreadyThere) {
+        S.store.update((x) => { x.joined = true; return x; });
+        S.joinState = "joined";
+      } else {
+        S.joinState = "refused";
       }
     }
 
-    function renderChoices() {
-      const box = $("choices");
-      box.innerHTML = "";
-      for (let n = 1; n <= 5; n++) {
-        const b = document.createElement("button");
-        b.textContent = n;
-        b.className = "rounded-lg border border-slate-300 py-3 text-lg font-medium active:bg-slate-200";
-        b.addEventListener("click", () => sendAnswer(n));
-        box.appendChild(b);
-      }
-      shownAt = performance.now();
+    // ---------- routing ----------
+    function route() {
+      const s = S.session;
+      const st = S.store.get();
+      setStatus("");
+      if (s.locked) return show("ended", () => el("p", { class: "text-lg" }, S.t("join.ended")));
+      if (S.joinState === "refused") return show("refused", () => el("p", { class: "text-lg" }, S.t("join.closed")));
+      if (S.joinState !== "joined") return show("joining", () => el("p", {}, S.t("status.connecting")));
+      if (s.consent && st.consent == null) return showConsent();
+      if (s.game) return showGame(s.game);
+      if (s.quiz && (s.quiz.open || s.quiz.reveal)) return showQuiz(s.quiz);
+      const remaining = remainingSteps();
+      if (s.collectOpen && remaining.length) return showStep(remaining[0], remaining.length);
+      if (s.reveal && st.answers?.[s.reveal]) return showPersonalResult(s.reveal);
+      const finished = (s.order || []).length && !remaining.length;
+      return show(finished ? "done" : "wait", () => el("p", { class: "text-lg" }, S.t(finished ? "collect.done" : "wait.general")));
     }
 
-    async function sendAnswer(choice) {
-      const uid = auth.currentUser.uid;
-      $("sendMsg").className = "text-sm text-slate-600";
-      $("sendMsg").textContent = "Đang gửi…";
+    function remainingSteps() {
+      const s = S.session, done = S.store.get().done || {};
+      return (s.order || []).filter((k) => !done[k] && (s.collect || []).includes(parseStepKey(k).exp));
+    }
+
+    function showConsent() {
+      show("consent", () => {
+        const answer = (val) => {
+          S.store.update((st) => { st.consent = val; return st; });
+          updateParticipant({ consent: val });
+          S.viewKey = null; route();
+        };
+        return el("div", { class: "space-y-4 rounded-xl bg-white p-4 shadow-sm" },
+          el("h2", { class: "text-lg font-semibold" }, S.t("consent.title")),
+          el("p", { class: "whitespace-pre-line text-sm" }, S.t("consent.body")),
+          el("div", { class: "grid gap-2" },
+            el("button", { class: "rounded-lg bg-slate-900 py-3 font-medium text-white", onclick: () => answer(true) }, S.t("consent.agree")),
+            el("button", { class: "rounded-lg border border-slate-300 py-3", onclick: () => answer(false) }, S.t("consent.decline"))));
+      });
+    }
+
+    function makeCtx(exp, extra = {}) {
+      return { lang: S.lang, t: S.t, uid: S.uid, code: S.code, exp, myAnswers: S.store.get().answers?.[exp] || {}, ...extra };
+    }
+
+    async function assignmentFor(exp, fresh = false) {
+      S.assignCache = S.assignCache || {};
+      if (fresh || !(exp in S.assignCache)) {
+        const snap = await getDoc(doc(db, "sessions", S.code, "assignments", exp)).catch(() => null);
+        S.assignCache[exp] = snap?.exists() ? snap.data() : null;
+      }
+      const a = S.assignCache[exp];
+      return a?.byUid ? (a.byUid[S.uid] ?? null) : a;
+    }
+
+    // ---------- opening batch, self-paced ----------
+    function showStep(key, remainingCount) {
+      const total = (S.session.order || []).filter((k) => (S.session.collect || []).includes(parseStepKey(k).exp)).length;
+      show(`collect:${key}`, () => {
+        const box = el("div", { class: "space-y-3" },
+          el("p", { class: "text-xs text-slate-500" }, S.t("collect.progress", { i: total - remainingCount + 1, n: total })),
+          el("p", { class: "text-sm text-slate-500" }, S.t("status.loading")));
+        renderStep(key, box);
+        return box;
+      });
+    }
+
+    async function renderStep(key, box) {
+      const { exp, step } = parseStepKey(key);
       try {
-        await setDoc(doc(db, "sessions", roomCode, "responses", responseId(uid, TEST_EXP)), {
-          uid,
-          exp: TEST_EXP,
-          answers: { choice },
-          times: { choice: Math.round(performance.now() - shownAt) },
-          updatedAt: serverTimestamp()
-        });
-        $("sendMsg").className = "text-sm text-emerald-700";
-        $("sendMsg").textContent = `Đã ghi câu trả lời: ${choice}.`;
+        const config = await loadConfig(S.catalog, exp);
+        const engine = await loadEngine(S.catalog, config.engine);
+        const assignment = await assignmentFor(exp);
+        const ctx = makeCtx(exp, { step, assignment, submit: (answers, times) => {
+          if (S.busy || S.viewKey !== `collect:${key}`) return;
+          S.busy = true;
+          writeResponse(exp, answers, times);
+          S.store.update((st) => { st.done = { ...(st.done || {}), [key]: true }; return st; });
+          if (!remainingSteps().length) updateParticipant({ done: true });
+          S.busy = false;
+          S.viewKey = null;
+          route();
+        } });
+        const node = engine.renderStudent(step, config, ctx);
+        if (S.viewKey === `collect:${key}`) box.lastChild.replaceWith(el("div", { class: "rounded-xl bg-white p-4 shadow-sm" }, node));
       } catch (e) {
-        $("sendMsg").className = "text-sm text-rose-700";
-        $("sendMsg").textContent = e.code === "permission-denied"
-          ? "Phòng chưa mở phiên thu hoặc đã khóa."
-          : `Gửi lỗi (${e.code || e.message}).`;
+        box.lastChild.replaceWith(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`));
       }
+    }
+
+    // ---------- personal result after reveal (engine C computes it on the phone) ----------
+    function showPersonalResult(exp) {
+      show(`result:${exp}`, () => {
+        const box = el("div", {}, el("p", { class: "text-sm text-slate-500" }, S.t("status.loading")));
+        (async () => {
+          const config = await loadConfig(S.catalog, exp);
+          const engine = await loadEngine(S.catalog, config.engine);
+          const mine = S.store.get().answers?.[exp] || {};
+          const score = engine.scoreLocal(mine, config);
+          const node = score == null ? null : engine.renderStudent("__result", config, makeCtx(exp, { score }));
+          box.replaceChildren(node || el("p", { class: "text-lg" }, S.t("reveal.look")));
+        })().catch((e) => box.replaceChildren(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`)));
+        return box;
+      });
+    }
+
+    // ---------- games: intro, open, locked, reveal ----------
+    function showGame(g) {
+      const rk = `r${g.round || 1}`;
+      const answered = S.store.get().answers?.[g.exp]?.[rk] != null;
+      show(`game:${g.exp}:${g.phase}:${rk}:${answered}`, () => {
+        const box = el("div", { class: "space-y-3" }, el("p", { class: "text-sm text-slate-500" }, S.t("status.loading")));
+        (async () => {
+          const config = await loadConfig(S.catalog, g.exp);
+          const engine = await loadEngine(S.catalog, config.engine);
+          const head = el("p", { class: "text-xs text-slate-500" }, S.t("game.round", { r: g.round || 1 }));
+          let body;
+          if (g.phase === "intro") {
+            body = el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, pick(config.rules || config.scenario, S.lang)),
+              el("p", { class: "text-sm text-slate-500" }, S.t("game.waitOpen")));
+          } else if (g.phase === "open") {
+            if (answered) body = el("p", { class: "text-lg" }, S.t("game.waitOthers"));
+            else {
+              const assignment = await assignmentFor(g.exp, true);
+              body = engine.renderStudent(rk, config, makeCtx(g.exp, { step: rk, round: g.round || 1, assignment,
+                submit: (answers, times) => {
+                  if (S.store.get().answers?.[g.exp]?.[rk] != null) return;
+                  writeResponse(g.exp, answers, times);
+                  S.viewKey = null; route();
+                } }));
+            }
+          } else if (g.phase === "locked") {
+            body = el("p", { class: "text-lg" }, S.t("game.locked"));
+          } else {
+            const res = await getDoc(doc(db, "sessions", S.code, "results", g.exp)).catch(() => null);
+            body = engine.renderStudent("__result", config, makeCtx(g.exp, { round: g.round || 1, result: res?.data()?.result || null,
+              assignment: await assignmentFor(g.exp, true) })) || el("p", {}, S.t("reveal.look"));
+          }
+          box.replaceChildren(head, el("div", { class: "rounded-xl bg-white p-4 shadow-sm" }, body));
+        })().catch((e) => box.replaceChildren(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`)));
+        return box;
+      });
+    }
+
+    // ---------- end-of-session quiz ----------
+    function showQuiz(q) {
+      const mine = S.store.get().answers?.[QUIZ_ID];
+      const mode = q.reveal ? "reveal" : (mine ? "sent" : "open");
+      show(`quiz:${q.id}:${mode}`, () => {
+        const box = el("div", { class: "space-y-3" }, el("p", { class: "text-sm text-slate-500" }, S.t("status.loading")));
+        loadQuiz(S.catalog, q.id).then((quiz) => {
+          if (mode === "sent") return box.replaceChildren(el("p", { class: "text-lg" }, S.t("quiz.sent")));
+          const items = quiz.questions.map((qq, i) => {
+            const name = `q${i + 1}`;
+            const opts = qq.options.map((o, j) => {
+              const mark = mode === "reveal" ? (j === qq.answer ? " ✓" : (mine?.[name] === j ? " ✗" : "")) : "";
+              return el("label", { class: "flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2" },
+                el("input", { type: "radio", name, value: String(j), disabled: mode === "reveal", checked: mine?.[name] === j }),
+                el("span", {}, pick(o, S.lang) + mark));
+            });
+            return el("fieldset", { class: "space-y-2" }, el("legend", { class: "font-medium" }, `${i + 1}. ${pick(qq.prompt, S.lang)}`), opts);
+          });
+          const parts = [el("h2", { class: "text-lg font-semibold" }, pick(quiz.title, S.lang)), ...items];
+          if (mode === "open") {
+            let area = null;
+            if (quiz.reflection) {
+              area = el("textarea", { maxlength: "500", rows: "3", class: "w-full rounded-lg border border-slate-300 p-2" });
+              parts.push(el("label", { class: "block space-y-1" }, el("span", { class: "font-medium" }, pick(quiz.reflection, S.lang)), area));
+            }
+            parts.push(el("button", { class: "w-full rounded-lg bg-slate-900 py-3 font-medium text-white", onclick: () => {
+              const answers = {};
+              quiz.questions.forEach((_, i) => {
+                const c = box.querySelector(`input[name=q${i + 1}]:checked`);
+                if (c) answers[`q${i + 1}`] = Number(c.value);
+              });
+              if (area && area.value.trim()) answers.reflection = area.value.trim().slice(0, 500);
+              writeResponse(QUIZ_ID, answers, null);
+              S.viewKey = null; route();
+            } }, S.t("quiz.submit")));
+          }
+          box.replaceChildren(el("div", { class: "space-y-4 rounded-xl bg-white p-4 shadow-sm" }, parts));
+        }).catch((e) => box.replaceChildren(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`)));
+        return box;
+      });
     }
   </script>
 </body>

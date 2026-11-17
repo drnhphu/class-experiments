@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kiểm thử quy tắc bảo mật</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!--
+    Automated security-rules test against the real project.
+    The default app must be signed in as the instructor (same browser as control.html); it creates a
+    throwaway room and walks it through every state. Three named apps (A, B, C) act as separate phones.
+    The room is deleted at the end.
+  -->
+  <main class="mx-auto max-w-3xl p-4 space-y-4">
+    <h1 class="text-xl font-semibold">Kiểm thử quy tắc bảo mật (Giai đoạn 1)</h1>
+    <div class="flex gap-2">
+      <button id="signIn" class="hidden rounded-lg border border-slate-300 bg-white px-4 py-2">Đăng nhập Google (giảng viên)</button>
+      <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40" disabled>Chạy kiểm thử</button>
+    </div>
+    <p id="who" class="text-xs text-slate-500"></p>
+    <div id="verdict" class="hidden rounded-xl p-4 font-semibold"></div>
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500"><tr><th class="w-8">#</th><th>Phép thử</th><th class="w-20">Kỳ vọng</th><th class="w-24">Thực tế</th><th class="w-6"></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+
+  <script type="module">
+    import {
+      auth, db, firebaseConfig, initializeApp, getAuth, getFirestore, signInAnonymously, onAuthStateChanged,
+      GoogleAuthProvider, signInWithPopup, doc, collection, getDocFromServer, getDocsFromServer, setDoc, updateDoc,
+      serverTimestamp, writeBatch, getDocs
+    } from "../js/firebase.js";
+    import { newRoomCode, responseId } from "../js/room.js";
+
+    const $ = (id) => document.getElementById(id);
+    const label = { allowed: "Cho phép", denied: "Bị chặn" };
+
+    onAuthStateChanged(auth, (u) => {
+      const ok = !!u && u.providerData.some((p) => p.providerId === "google.com");
+      $("signIn").classList.toggle("hidden", ok);
+      $("run").disabled = !ok;
+      $("who").textContent = ok ? `Giảng viên: ${u.email}` : "Cần đăng nhập bằng tài khoản giảng viên để trang tự đổi trạng thái phòng.";
+    });
+    $("signIn").onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+
+    async function phone(name) {
+      const app = initializeApp(firebaseConfig, name);
+      const a = getAuth(app);
+      await a.authStateReady();
+      if (!a.currentUser) await signInAnonymously(a);
+      return { uid: a.currentUser.uid, db: getFirestore(app) };
+    }
+
+    const timeout = (p) => Promise.race([p, new Promise((_, r) => setTimeout(() => r({ code: "timeout" }), 10000))]);
+    async function outcome(fn) {
+      try { await timeout(fn()); return "allowed"; }
+      catch (e) { return e.code === "permission-denied" ? "denied" : `lỗi: ${e.code || e.message}`; }
+    }
+
+    let n = 0, allPass = true;
+    function row(text, expected, actual, gate) {
+      const pass = expected === actual;
+      allPass &&= pass;
+      const tr = document.createElement("tr");
+      tr.className = `border-t border-slate-200 ${gate ? "bg-sky-50" : ""}`;
+      [String(++n), text, label[expected], label[actual] || actual, pass ? "✓" : "✗"].forEach((v, k) => {
+        const td = document.createElement("td");
+        td.textContent = v;
+        td.className = "py-1 pr-2 align-top" + (k === 4 ? (pass ? " text-emerald-700" : " text-rose-700 font-bold") : "");
+        tr.append(td);
+      });
+      $("rows").append(tr);
+    }
+    function stepNote(text) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5; td.className = "pt-3 text-xs font-medium uppercase text-slate-500"; td.textContent = text;
+      tr.append(td); $("rows").append(tr);
+    }
+    async function check(text, expected, fn, gate = false) { row(text, expected, await outcome(fn), gate); }
+
+    $("run").onclick = async () => {
+      $("run").disabled = true; $("rows").innerHTML = ""; $("verdict").classList.add("hidden"); n = 0; allPass = true;
+      const code = newRoomCode();
+      const sref = doc(db, "sessions", code);
+      try {
+        const A = await phone("rulesA"), B = await phone("rulesB"), C = await phone("rulesC");
+        $("who").textContent += ` · phòng thử ${code} · A ${A.uid.slice(0, 6)} · B ${B.uid.slice(0, 6)} · C ${C.uid.slice(0, 6)}`;
+        const resp = (P, exp, extra = {}) => setDoc(doc(P.db, "sessions", code, "responses", responseId(P.uid, exp)),
+          { uid: P.uid, exp, answers: { s1: 1 }, times: { s1: 900 }, updatedAt: serverTimestamp(), ...extra }, { merge: true });
+        const join = (P) => setDoc(doc(P.db, "sessions", code, "participants", P.uid), { joinedAt: serverTimestamp(), lang: "vi" });
+        const set = (fields, note) => { stepNote(note); return updateDoc(sref, fields); };
+
+        await setDoc(sref, { owner: auth.currentUser.uid, createdAt: serverTimestamp(), appVersion: "rules-test", catalog: "test", lang: "vi",
+          info: { program: "other", label: "rules test", date: "2000-01-01" }, collect: ["T01"], order: ["T01#s1", "T01#s2"], games: ["T03"],
+          versions: { T01: "1.0", T03: "1.0" }, consent: false, quiz: { id: "quiz-test", version: "1.0", open: false, reveal: false },
+          joinOpen: true, collectOpen: false, reveal: null, game: null, locked: false });
+
+        stepNote("Phòng mới, phiên thu khóa");
+        await check("A vào phòng (tạo bản ghi người tham gia)", "allowed", () => join(A));
+        await check("A tạo bản ghi người tham gia mang mã của B", "denied", () => setDoc(doc(A.db, "sessions", code, "participants", B.uid), { joinedAt: serverTimestamp(), lang: "vi" }));
+        await check("A ghi T01 khi phiên thu khóa", "denied", () => resp(A, "T01"));
+
+        await set({ collectOpen: true }, "Giảng viên mở phiên thu");
+        await check("A ghi câu trả lời T01", "allowed", () => resp(A, "T01"), true);
+        await check("B chưa vào phòng ghi T01 (người ngoài)", "denied", () => resp(B, "T01"));
+        await check("B vào phòng", "allowed", () => join(B));
+        await check("B ghi câu trả lời T01", "allowed", () => resp(B, "T01"));
+        await check("B đọc câu trả lời của A theo mã tài liệu", "denied", () => getDocFromServer(doc(B.db, "sessions", code, "responses", responseId(A.uid, "T01"))), true);
+        await check("B liệt kê mọi câu trả lời trong phòng", "denied", () => getDocsFromServer(collection(B.db, "sessions", code, "responses")), true);
+        await check("B đọc danh sách người tham gia", "denied", () => getDocsFromServer(collection(B.db, "sessions", code, "participants")));
+        await check("A đánh dấu đã xong phiên thu", "allowed", () => updateDoc(doc(A.db, "sessions", code, "participants", A.uid), { done: true }));
+        await check("A sửa thời điểm vào phòng của mình", "denied", () => updateDoc(doc(A.db, "sessions", code, "participants", A.uid), { joinedAt: serverTimestamp() }));
+        await check("A ghi kèm cờ đồng ý", "allowed", () => resp(A, "T01", { consent: true }));
+        await check("A ghi kèm trường lạ", "denied", () => resp(A, "T01", { name: "x" }));
+        await check("A ghi T03 khi trò chơi chưa bắt đầu", "denied", () => resp(A, "T03"));
+
+        await set({ game: { exp: "T03", phase: "intro", round: 1 } }, "Trò chơi T03, pha giới thiệu");
+        await check("A ghi T03 ở pha giới thiệu", "denied", () => resp(A, "T03"));
+        await set({ "game.phase": "open" }, "Pha mở");
+        await check("A ghi T03 ở pha mở", "allowed", () => resp(A, "T03"));
+        await set({ "game.phase": "locked" }, "Pha khóa");
+        await check("A ghi T03 ở pha khóa", "denied", () => resp(A, "T03"));
+
+        stepNote("Kiểm tra nhanh chưa mở");
+        await check("A ghi Q00 khi kiểm tra nhanh chưa mở", "denied", () => resp(A, "Q00"));
+        await set({ "quiz.open": true, game: null }, "Mở kiểm tra nhanh");
+        await check("A ghi Q00 khi kiểm tra nhanh mở", "allowed", () => resp(A, "Q00"));
+
+        await set({ joinOpen: false }, "Khóa nhận người mới");
+        await check("C vào phòng khi đã khóa người mới", "denied", () => join(C));
+
+        await set({ locked: true }, "Đóng phiên (phiên thu vẫn để mở)");
+        await check("A ghi T01 khi phiên đã đóng", "denied", () => resp(A, "T01"));
+        await check("A cập nhật bản ghi người tham gia khi phiên đã đóng", "denied", () => updateDoc(doc(A.db, "sessions", code, "participants", A.uid), { done: false }));
+
+        stepNote("Quyền đọc của giảng viên và kho so sánh");
+        let count = -1;
+        await check("Giảng viên đọc mọi câu trả lời", "allowed", async () => { count = (await getDocsFromServer(collection(sref, "responses"))).size; });
+        row(`Số bản ghi giảng viên thấy: ${count} (kỳ vọng 4: A_T01, B_T01, A_T03, A_Q00)`, "allowed", count === 4 ? "allowed" : `lỗi: ${count}`);
+        await check("B ghi vào kho so sánh", "denied", () => setDoc(doc(B.db, "archive", "probe"), { x: 1 }));
+        await check("B đọc kho so sánh", "denied", () => getDocFromServer(doc(B.db, "archive", "probe")));
+
+        const v = $("verdict");
+        v.classList.remove("hidden");
+        v.className = `rounded-xl p-4 font-semibold ${allPass ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`;
+        v.textContent = allPass ? `Tất cả ${n} phép thử đúng kỳ vọng.` : "CÓ phép thử sai kỳ vọng.";
+      } catch (e) {
+        $("who").textContent += ` · Lỗi khi chạy: ${e.code || e.message}`;
+      } finally {
+        // Clean up the throwaway room.
+        try {
+          const batch = writeBatch(db);
+          for (const sub of ["participants", "responses", "assignments", "results"]) (await getDocs(collection(sref, sub))).forEach((d) => batch.delete(d.ref));
+          batch.delete(sref);
+          await batch.commit();
+        } catch { /* leave it; it is marked as a rules test */ }
+        $("run").disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

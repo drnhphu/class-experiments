@@ -1,8 +1,9 @@
 rules_version = '2';
 
 // Security rules for the classroom experiment app.
-// Data model (plan, section "Dữ liệu, ẩn danh và so sánh giữa các lớp"):
+// Data model (plan, section "Dữ liệu, ẩn danh và so sánh giữa các lớp", plus participants agreed in Phase 1):
 //   sessions/{code}                         session state; instructor writes, any signed-in user may get one doc
+//   sessions/{code}/participants/{uid}      one doc per person who joined; owner writes, instructor reads
 //   sessions/{code}/responses/{uid_expId}   one person's answers to one experiment; owner writes while open, instructor reads
 //   sessions/{code}/assignments/{expId}     conditions (engine B), pairs and roles (engine D); instructor writes
 //   sessions/{code}/results/{expId}         aggregates and pair scores; instructor writes
@@ -27,27 +28,43 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/sessions/$(code)).data;
     }
 
-    // Accept a response only while the room is not locked and either
-    // the opening batch is open and lists this experiment, or this experiment's game phase is "open".
+    function isParticipant(code) {
+      return exists(/databases/$(database)/documents/sessions/$(code)/participants/$(request.auth.uid));
+    }
+
+    // Accept a response only while the room is not closed and one of these is open for this experiment:
+    // the opening batch, the game phase "open", or the end-of-session quiz (fixed id Q00).
     function accepting(code, expId) {
       let s = sessionData(code);
       let game = s.get('game', null);
+      let quiz = s.get('quiz', null);
       return s.get('locked', true) == false
         && ((s.get('collectOpen', false) == true && expId in s.get('collect', []))
-            || (game != null && game.get('exp', '') == expId && game.get('phase', '') == 'open'));
+            || (game != null && game.get('exp', '') == expId && game.get('phase', '') == 'open')
+            || (quiz != null && expId == 'Q00' && quiz.get('open', false) == true));
     }
 
-    // Locked response shape: fixed keys, own uid, server timestamp, bounded maps.
+    // Locked response shape: fixed keys, own uid, server timestamp, bounded maps, optional consent flag.
     function validResponse(d) {
       return d.keys().hasAll(['uid', 'exp', 'answers', 'updatedAt'])
-        && d.keys().hasOnly(['uid', 'exp', 'answers', 'times', 'updatedAt'])
+        && d.keys().hasOnly(['uid', 'exp', 'answers', 'times', 'consent', 'updatedAt'])
         && d.uid == request.auth.uid
         && d.exp is string
         && d.exp.matches('^[A-Z][0-9]{2}$')
         && d.answers is map
         && d.answers.size() <= 100
         && (!('times' in d) || (d.times is map && d.times.size() <= 100))
+        && (!('consent' in d) || d.consent == null || d.consent is bool)
         && d.updatedAt == request.time;
+    }
+
+    // Participant record: join time, language, optional consent and "finished the batch" flags. No names.
+    function validParticipant(d) {
+      return d.keys().hasAll(['joinedAt', 'lang'])
+        && d.keys().hasOnly(['joinedAt', 'lang', 'consent', 'done'])
+        && d.lang in ['vi', 'en']
+        && (!('consent' in d) || d.consent == null || d.consent is bool)
+        && (!('done' in d) || d.done is bool);
     }
 
     match /sessions/{code} {
@@ -58,11 +75,27 @@ service cloud.firestore {
         && request.resource.data.owner == request.auth.uid;
       allow update, delete: if isInstructor();
 
+      match /participants/{uid} {
+        allow read, delete: if isInstructor();
+        allow create: if signedIn()
+          && uid == request.auth.uid
+          && validParticipant(request.resource.data)
+          && request.resource.data.joinedAt == request.time
+          && sessionData(code).get('locked', true) == false
+          && sessionData(code).get('joinOpen', false) == true;
+        allow update: if signedIn()
+          && uid == request.auth.uid
+          && validParticipant(request.resource.data)
+          && request.resource.data.joinedAt == resource.data.joinedAt
+          && sessionData(code).get('locked', true) == false;
+      }
+
       match /responses/{rid} {
         allow read, delete: if isInstructor();
         allow create, update: if signedIn()
           && rid == request.auth.uid + '_' + request.resource.data.exp
           && validResponse(request.resource.data)
+          && isParticipant(code)
           && accepting(code, request.resource.data.exp);
       }
 

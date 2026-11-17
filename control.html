@@ -7,191 +7,483 @@
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
-  <!-- Phase 0 instructor page: Google sign-in, create a test room, open/close the opening batch, watch responses. -->
-  <main class="mx-auto max-w-3xl p-6 space-y-6">
+  <!-- Instructor page (laptop): create or resume a session, drive the opening batch, reveals, games, quiz,
+       aggregate results, export CSV, archive, delete raw data. All "server" logic runs here. -->
+  <main class="mx-auto max-w-4xl p-6 space-y-6">
     <header class="flex items-center justify-between">
-      <h1 class="text-2xl font-semibold">Bảng điều khiển (Giai đoạn 0)</h1>
+      <h1 id="title" class="text-2xl font-semibold"></h1>
       <div class="text-right text-sm">
         <div id="account" class="text-slate-600"></div>
-        <button id="signInBtn" class="mt-1 rounded-lg bg-slate-900 px-4 py-2 text-white">Đăng nhập Google</button>
-        <button id="signOutBtn" class="mt-1 hidden rounded-lg border border-slate-300 px-3 py-1">Đăng xuất</button>
+        <button id="signInBtn" class="mt-1 rounded-lg bg-slate-900 px-4 py-2 text-white"></button>
+        <button id="signOutBtn" class="mt-1 hidden rounded-lg border border-slate-300 px-3 py-1"></button>
       </div>
     </header>
-
     <p id="status" class="text-sm text-slate-600"></p>
 
-    <section id="bootstrap" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm space-y-2">
-      <p class="font-medium">Tài khoản này chưa có quyền giảng viên trong quy tắc bảo mật.</p>
-      <p>UID của tài khoản:</p>
-      <div class="flex gap-2">
-        <code id="uidBox" class="flex-1 rounded bg-white px-2 py-1 font-mono break-all"></code>
-        <button id="copyUid" class="rounded border border-slate-300 bg-white px-3">Chép</button>
-      </div>
-      <p>Thêm UID này vào danh sách trong hàm <code>isInstructor()</code> của firestore.rules, bấm Publish trong Firebase console, rồi tải lại trang.</p>
-    </section>
-
-    <section id="roomPanel" class="hidden space-y-4">
-      <div class="flex items-center gap-3">
-        <button id="createBtn" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Tạo phòng thử</button>
-        <span class="text-sm text-slate-500">Phòng thử chỉ có câu kết nối T00.</span>
-      </div>
-
-      <div id="roomInfo" class="hidden rounded-xl bg-white p-5 shadow-sm space-y-3">
-        <div class="flex items-baseline justify-between">
-          <div>
-            <div class="text-sm text-slate-500">Mã phòng</div>
-            <div id="roomCode" class="font-mono text-4xl font-bold tracking-widest"></div>
-          </div>
-          <div class="text-right">
-            <div class="text-sm text-slate-500">Phiên thu</div>
-            <div id="collectState" class="text-lg font-semibold"></div>
-          </div>
-        </div>
-        <div class="flex gap-2">
-          <button id="openBtn" class="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-40">Mở phiên thu</button>
-          <button id="closeBtn" class="rounded-lg bg-rose-700 px-4 py-2 text-white disabled:opacity-40">Khóa phiên thu</button>
-        </div>
-        <div class="text-sm space-y-1">
-          <div>Link cho điện thoại: <a id="joinLink" class="text-sky-700 underline break-all" target="_blank"></a></div>
-          <div>Trang kiểm thử cửa: <a id="gateLink" class="text-sky-700 underline break-all" target="_blank"></a></div>
-        </div>
-      </div>
-
-      <div id="respBox" class="hidden rounded-xl bg-white p-5 shadow-sm">
-        <div class="mb-2 font-medium">Câu trả lời đã nhận: <span id="respCount">0</span></div>
-        <table class="w-full text-sm">
-          <thead class="text-left text-slate-500"><tr><th>Tài liệu</th><th>Câu trả lời</th><th>Thời gian (ms)</th></tr></thead>
-          <tbody id="respRows"></tbody>
-        </table>
-      </div>
-    </section>
+    <section id="bootstrap" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm space-y-2"></section>
+    <section id="setup" class="hidden space-y-6"></section>
+    <section id="live" class="hidden space-y-4"></section>
   </main>
 
   <script type="module">
     import {
       auth, db, configMissing, APP_VERSION, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut,
-      doc, collection, query, limit, getDoc, getDocs, setDoc, updateDoc, onSnapshot, serverTimestamp
+      doc, collection, query, where, limit, getDoc, getDocs, setDoc, updateDoc, onSnapshot, serverTimestamp, writeBatch
     } from "./js/firebase.js";
+    import { loadLang, makeT, pick, el } from "./js/i18n.js";
+    import { loadCatalog, validateEntry, loadQuiz, quizErrors, loadConfig, loadEngine } from "./js/catalog.js";
     import { newRoomCode } from "./js/room.js";
+    import { buildOrder, presentView, poolKey, orderSignature, buildCsv, buildArchive, downloadText, QUIZ_ID } from "./js/session.js";
 
     const $ = (id) => document.getElementById(id);
-    let unsubs = [];
-    let roomCode = null;
+    const t = makeT(await loadLang("vi")); // the control page is for the instructor: Vietnamese UI
+    const catalogName = new URLSearchParams(location.search).get("catalog") === "test" ? "test" : "main";
+    const C = { user: null, catalog: null, checks: new Map(), quizChecks: new Map(), code: null, session: null,
+                participants: new Map(), responses: new Map(), assignments: {}, unsubs: [], chan: null,
+                history: {}, gameChoice: null, form: { lang: "vi", picked: [] } };
+
+    $("title").textContent = t("control.title") + (catalogName === "test" ? ` · ${t("control.testCatalog")}` : "");
+    $("signInBtn").textContent = t("control.signIn");
+    $("signOutBtn").textContent = t("control.signOut");
 
     function setStatus(text, tone = "muted") {
       const tones = { muted: "text-slate-600", ok: "text-emerald-700", bad: "text-rose-700" };
       $("status").className = `text-sm ${tones[tone]}`;
-      $("status").textContent = text;
+      $("status").textContent = text || "";
+    }
+    const btn = (label, onclick, cls = "border border-slate-300 bg-white", disabled = false) =>
+      el("button", { class: `rounded-lg px-3 py-2 text-sm disabled:opacity-40 ${cls}`, onclick, disabled }, label);
+    const primary = "bg-slate-900 text-white";
+    const today = () => new Date().toISOString().slice(0, 10);
+
+    // Two-click confirm without browser dialogs.
+    function confirmBtn(label, confirmLabel, action, cls) {
+      let armed = false;
+      const b = btn(label, async () => {
+        if (!armed) { armed = true; b.textContent = confirmLabel; setTimeout(() => { armed = false; b.textContent = label; }, 4000); return; }
+        b.disabled = true;
+        try { await action(); } finally { b.disabled = false; armed = false; b.textContent = label; }
+      }, cls);
+      return b;
     }
 
-    if (configMissing) {
-      setStatus("Chưa điền cấu hình Firebase trong js/firebase-config.js.", "bad");
-      throw new Error("Firebase config missing");
+    async function guard(fn, okText) {
+      try { await fn(); if (okText) setStatus(okText, "ok"); }
+      catch (e) { console.error(e); setStatus(`${t("err.action")} (${e.code || e.message})`, "bad"); }
     }
 
-    $("signInBtn").addEventListener("click", async () => {
-      try { await signInWithPopup(auth, new GoogleAuthProvider()); }
-      catch (e) { setStatus(`Đăng nhập lỗi (${e.code}).`, "bad"); }
-    });
-    $("signOutBtn").addEventListener("click", () => signOut(auth));
-    $("copyUid").addEventListener("click", () => navigator.clipboard.writeText($("uidBox").textContent));
+    if (configMissing) { setStatus(t("err.config"), "bad"); throw new Error("config"); }
+
+    // ---------- auth ----------
+    $("signInBtn").onclick = () => signInWithPopup(auth, new GoogleAuthProvider()).catch((e) => setStatus(`${t("err.signin")} (${e.code})`, "bad"));
+    $("signOutBtn").onclick = () => signOut(auth);
 
     onAuthStateChanged(auth, async (user) => {
-      unsubs.forEach((u) => u()); unsubs = [];
-      const isGoogle = user && user.providerData.some((p) => p.providerId === "google.com");
-      $("signInBtn").classList.toggle("hidden", !!isGoogle);
+      detach();
+      const isGoogle = !!user && user.providerData.some((p) => p.providerId === "google.com");
+      C.user = isGoogle ? user : null;
+      $("signInBtn").classList.toggle("hidden", isGoogle);
       $("signOutBtn").classList.toggle("hidden", !isGoogle);
       $("account").textContent = isGoogle ? user.email : "";
-      $("bootstrap").classList.add("hidden");
-      $("roomPanel").classList.add("hidden");
-      if (!isGoogle) { setStatus("Đăng nhập bằng tài khoản Google của giảng viên."); return; }
-
-      // Listing sessions is allowed for the instructor only, so a 1-document query tells us the role.
+      for (const id of ["bootstrap", "setup", "live"]) $(id).classList.add("hidden");
+      if (!isGoogle) { setStatus(t("control.pleaseSignIn")); return; }
       try {
-        await getDocs(query(collection(db, "sessions"), limit(1)));
-        setStatus("Đã xác nhận quyền giảng viên.", "ok");
-        $("roomPanel").classList.remove("hidden");
+        await getDocs(query(collection(db, "sessions"), limit(1))); // instructor-only list: tells us the role
       } catch (e) {
-        if (e.code === "permission-denied") {
-          $("uidBox").textContent = user.uid;
-          $("bootstrap").classList.remove("hidden");
-          setStatus("");
-        } else {
-          setStatus(`Không kiểm tra được quyền (${e.code}).`, "bad");
-        }
+        if (e.code !== "permission-denied") { setStatus(`${t("err.role")} (${e.code})`, "bad"); return; }
+        $("bootstrap").replaceChildren(
+          el("p", { class: "font-medium" }, t("control.notInstructor")),
+          el("p", {}, t("control.uidLabel")),
+          el("code", { class: "block rounded bg-white px-2 py-1 font-mono break-all" }, user.uid),
+          el("p", {}, t("control.uidHelp")));
+        $("bootstrap").classList.remove("hidden");
+        setStatus("");
+        return;
       }
+      setStatus("");
+      C.catalog = await loadCatalog(catalogName);
+      const last = localStorage.getItem("ce:control:room");
+      if (last && (await getDoc(doc(db, "sessions", last))).data()?.locked === false) attach(last);
+      else showSetup();
     });
 
-    $("createBtn").addEventListener("click", async () => {
-      $("createBtn").disabled = true;
-      try {
-        let code;
-        for (let i = 0; i < 5; i++) { // retry on the rare collision
-          code = newRoomCode();
-          if (!(await getDoc(doc(db, "sessions", code))).exists()) break;
-        }
-        await setDoc(doc(db, "sessions", code), {
-          owner: auth.currentUser.uid,
-          createdAt: serverTimestamp(),
-          appVersion: APP_VERSION,
-          lang: "vi",
-          collect: ["T00"],   // opening batch, in order
-          games: [],          // engine D experiments
-          collectOpen: false,
-          reveal: null,       // experiment whose results are shown
-          game: null,         // { exp, phase, round } while a game runs
-          locked: false       // true after the session is closed
-        });
-        attachRoom(code);
-        setStatus(`Đã tạo phòng ${code}.`, "ok");
-      } catch (e) {
-        setStatus(`Tạo phòng lỗi (${e.code || e.message}).`, "bad");
-      } finally {
-        $("createBtn").disabled = false;
-      }
-    });
+    // ---------- setup: resume, create, data retention ----------
+    async function showSetup() {
+      $("live").classList.add("hidden");
+      const setup = $("setup");
+      setup.classList.remove("hidden");
+      setup.replaceChildren(el("p", { class: "text-sm text-slate-500" }, t("status.loading")));
 
-    function attachRoom(code) {
-      unsubs.forEach((u) => u()); unsubs = [];
-      roomCode = code;
-      $("roomCode").textContent = code;
-      const join = new URL(`join.html?room=${code}`, location.href).href;
-      const gate = new URL(`tests/gate.html?room=${code}`, location.href).href;
-      $("joinLink").href = join; $("joinLink").textContent = join;
-      $("gateLink").href = gate; $("gateLink").textContent = gate;
-      $("roomInfo").classList.remove("hidden");
-      $("respBox").classList.remove("hidden");
+      const all = (await getDocs(collection(db, "sessions"))).docs
+        .map((d) => ({ code: d.id, ...d.data() })).filter((s) => s.owner === C.user.uid);
+      const open = all.filter((s) => !s.locked);
+      const closed = all.filter((s) => s.locked).sort((a, b) => (a.closedAt?.seconds || 0) - (b.closedAt?.seconds || 0));
 
-      unsubs.push(onSnapshot(doc(db, "sessions", code), (snap) => {
-        const open = !!snap.data()?.collectOpen;
-        $("collectState").textContent = open ? "Đang mở" : "Đang khóa";
-        $("collectState").className = `text-lg font-semibold ${open ? "text-emerald-700" : "text-rose-700"}`;
-        $("openBtn").disabled = open;
-        $("closeBtn").disabled = !open;
+      await Promise.all(C.catalog.experiments.map(async (e) => C.checks.set(e.id, await validateEntry(C.catalog, e))));
+      await Promise.all(C.catalog.quizzes.map(async (q) => {
+        try { const quiz = await loadQuiz(C.catalog, q.id); C.quizChecks.set(q.id, { quiz, errors: quizErrors(quiz, q.id) }); }
+        catch (e) { C.quizChecks.set(q.id, { errors: [e.message] }); }
       }));
 
-      unsubs.push(onSnapshot(collection(db, "sessions", code, "responses"), (snap) => {
-        $("respCount").textContent = snap.size;
-        $("respRows").innerHTML = "";
-        snap.forEach((d) => {
-          const r = d.data();
-          const tr = document.createElement("tr");
-          tr.className = "border-t border-slate-100";
-          // Student data is untrusted: set textContent only, never innerHTML.
-          const cells = [`${d.id.slice(0, 6)}…_${r.exp}`, JSON.stringify(r.answers), String(r.times?.choice ?? "")];
-          cells.forEach((text, i) => {
-            const td = document.createElement("td");
-            td.textContent = text;
-            if (i === 0) td.className = "py-1 font-mono";
-            tr.appendChild(td);
-          });
-          $("respRows").appendChild(tr);
-        });
-      }, (e) => setStatus(`Không đọc được câu trả lời (${e.code}).`, "bad")));
+      setup.replaceChildren(
+        open.length ? card(t("setup.resume"), open.map((s) => el("div", { class: "flex items-center justify-between border-t border-slate-100 py-2" },
+          el("span", { class: "font-mono" }, `${s.code} · ${s.info?.date || ""} · ${s.info?.program || ""} ${s.info?.label || ""}`),
+          btn(t("setup.resumeBtn"), () => attach(s.code))))) : null,
+        createForm(),
+        closed.length ? card(t("setup.retention"), [el("p", { class: "text-sm text-slate-500" }, t("setup.retentionHelp")),
+          ...closed.map((s) => {
+            const days = s.closedAt ? Math.floor((Date.now() / 1000 - s.closedAt.seconds) / 86400) : 0;
+            return el("div", { class: "flex items-center justify-between border-t border-slate-100 py-2" },
+              el("span", { class: days >= 30 ? "font-mono text-rose-700" : "font-mono" },
+                `${s.code} · ${s.info?.date || ""} · ${t("setup.closedDays", { d: days })}${days >= 30 ? " · " + t("setup.due") : ""}`),
+              confirmBtn(t("setup.deleteRaw"), t("setup.confirm"), () => guard(() => deleteRaw(s.code).then(showSetup), t("setup.deleted")), "border border-rose-300 bg-white text-rose-700"));
+          })]) : null
+      );
     }
 
-    $("openBtn").addEventListener("click", () => updateDoc(doc(db, "sessions", roomCode), { collectOpen: true }));
-    $("closeBtn").addEventListener("click", () => updateDoc(doc(db, "sessions", roomCode), { collectOpen: false }));
+    function card(title, children) {
+      return el("div", { class: "rounded-xl bg-white p-5 shadow-sm space-y-3" }, el("h2", { class: "text-lg font-semibold" }, title), children);
+    }
+
+    function createForm() {
+      const F = C.form;
+      const programSel = el("select", { class: "rounded border border-slate-300 px-2 py-1" },
+        ["MBA", "BA", "CEO", "talkshow", "other"].map((p) => el("option", { value: p }, t(`program.${p}`))));
+      const labelIn = el("input", { class: "rounded border border-slate-300 px-2 py-1", placeholder: t("setup.labelHint"), maxlength: "60" });
+      const dateIn = el("input", { type: "date", value: today(), class: "rounded border border-slate-300 px-2 py-1" });
+      const consentIn = el("input", { type: "checkbox" });
+      const quizSel = el("select", { class: "rounded border border-slate-300 px-2 py-1" },
+        el("option", { value: "" }, t("setup.noQuiz")),
+        C.catalog.quizzes.map((q) => {
+          const errs = C.quizChecks.get(q.id)?.errors || [];
+          return el("option", { value: q.id, disabled: errs.length > 0 }, errs.length ? `${q.id} · ${t("setup.invalid")}` : q.id);
+        }));
+      const langBox = el("div", { class: "flex gap-2" });
+      const renderLang = () => langBox.replaceChildren(...["vi", "en"].map((l) =>
+        btn(t(`lang.${l}`), () => { F.lang = l; renderLang(); }, F.lang === l ? primary : "border border-slate-300 bg-white")));
+      renderLang();
+
+      const list = el("div", { class: "space-y-2" });
+      const renderList = () => {
+        const rows = C.catalog.experiments.map((e) => {
+          const chk = C.checks.get(e.id);
+          const ok = chk && !chk.errors.length;
+          const pos = F.picked.indexOf(e.id);
+          const kind = ok ? (chk.engine.mode === "live" ? t("setup.kindLive") : t("setup.kindCollect")) : "";
+          return el("div", { class: `rounded-lg border p-2 ${ok ? "border-slate-200" : "border-rose-300 bg-rose-50"}` },
+            el("div", { class: "flex items-center justify-between gap-2" },
+              el("label", { class: "flex items-center gap-2" },
+                el("input", { type: "checkbox", disabled: !ok, checked: pos >= 0, onchange: (ev) => {
+                  if (ev.target.checked) F.picked.push(e.id); else F.picked.splice(F.picked.indexOf(e.id), 1);
+                  renderList();
+                } }),
+                el("span", { class: "font-mono" }, e.id),
+                el("span", {}, ok ? `${pick(chk.config.concept, "vi")} · ${kind} · v${chk.config.version}` : t("setup.blocked"))),
+              pos >= 0 ? el("div", { class: "flex items-center gap-1" },
+                el("span", { class: "text-xs text-slate-500" }, `#${pos + 1}`),
+                btn("↑", () => { if (pos > 0) { [F.picked[pos - 1], F.picked[pos]] = [F.picked[pos], F.picked[pos - 1]]; renderList(); } }),
+                btn("↓", () => { if (pos < F.picked.length - 1) { [F.picked[pos + 1], F.picked[pos]] = [F.picked[pos], F.picked[pos + 1]]; renderList(); } })) : null),
+            ok ? null : el("ul", { class: "mt-1 list-disc pl-6 text-sm text-rose-700" }, chk.errors.map((x) => el("li", {}, x))));
+        });
+        list.replaceChildren(...(rows.length ? rows : [el("p", { class: "text-sm text-slate-500" }, t("setup.emptyCatalog"))]));
+      };
+      renderList();
+
+      const create = btn(t("setup.create"), () => guard(async () => {
+        if (!F.picked.length) throw new Error(t("setup.pickOne"));
+        const cfgs = F.picked.map((id) => C.checks.get(id));
+        const collectCfgs = cfgs.filter((c) => c.engine.mode === "collect").map((c) => c.config);
+        const games = cfgs.filter((c) => c.engine.mode === "live").map((c) => c.id);
+        const quizId = quizSel.value;
+        let code;
+        for (let i = 0; i < 5; i++) { code = newRoomCode(); if (!(await getDoc(doc(db, "sessions", code))).exists()) break; }
+        await setDoc(doc(db, "sessions", code), {
+          owner: C.user.uid, createdAt: serverTimestamp(), appVersion: APP_VERSION, catalog: catalogName, lang: F.lang,
+          info: { program: programSel.value, label: labelIn.value.trim(), date: dateIn.value || today() },
+          collect: collectCfgs.map((c) => c.id), order: buildOrder(collectCfgs), games,
+          versions: Object.fromEntries(cfgs.map((c) => [c.id, c.config.version])),
+          consent: consentIn.checked,
+          quiz: quizId ? { id: quizId, version: C.quizChecks.get(quizId).quiz.version, open: false, reveal: false } : null,
+          joinOpen: true, collectOpen: false, reveal: null, game: null, locked: false
+        });
+        F.picked = [];
+        attach(code);
+      }), primary);
+
+      return card(t("setup.new"), [
+        el("div", { class: "grid grid-cols-2 gap-3 text-sm" },
+          el("label", { class: "space-y-1" }, el("div", {}, t("setup.program")), programSel),
+          el("label", { class: "space-y-1" }, el("div", {}, t("setup.date")), dateIn),
+          el("label", { class: "space-y-1" }, el("div", {}, t("setup.label")), labelIn),
+          el("div", { class: "space-y-1" }, el("div", {}, t("setup.lang")), langBox),
+          el("label", { class: "flex items-center gap-2" }, consentIn, t("setup.consent")),
+          el("label", { class: "space-y-1" }, el("div", {}, t("setup.quiz")), quizSel)),
+        el("div", { class: "space-y-1" }, el("div", { class: "text-sm font-medium" }, t("setup.experiments")),
+          el("p", { class: "text-xs text-slate-500" }, t("setup.orderHelp")), list),
+        create]);
+    }
+
+    // ---------- live session ----------
+    function detach() {
+      C.unsubs.forEach((u) => u());
+      C.unsubs = [];
+      C.participants.clear(); C.responses.clear(); C.assignments = {};
+    }
+
+    function attach(code) {
+      detach();
+      C.code = code;
+      localStorage.setItem("ce:control:room", code);
+      C.chan?.close();
+      C.chan = new BroadcastChannel(`ce-present-${code}`);
+      C.chan.onmessage = (ev) => { if (ev.data?.type === "hello") pushPresent(); };
+      $("setup").classList.add("hidden");
+      $("live").classList.remove("hidden");
+      const sref = doc(db, "sessions", code);
+      C.unsubs.push(onSnapshot(sref, (snap) => { C.session = { code, ...snap.data() }; renderLive(); pushPresent(); }));
+      C.unsubs.push(onSnapshot(collection(sref, "participants"), (snap) => {
+        snap.docChanges().forEach((ch) => ch.type === "removed" ? C.participants.delete(ch.doc.id) : C.participants.set(ch.doc.id, ch.doc.data()));
+        renderCounts(); pushPresent();
+      }));
+      C.unsubs.push(onSnapshot(collection(sref, "responses"), (snap) => {
+        snap.docChanges().forEach((ch) => ch.type === "removed" ? C.responses.delete(ch.doc.id) : C.responses.set(ch.doc.id, ch.doc.data()));
+        renderCounts(); pushPresent();
+      }));
+      C.unsubs.push(onSnapshot(collection(sref, "assignments"), (snap) => {
+        snap.docChanges().forEach((ch) => { C.assignments[ch.doc.id] = ch.type === "removed" ? undefined : ch.doc.data(); });
+      }));
+    }
+
+    const sref = () => doc(db, "sessions", C.code);
+    const responsesOf = (exp) => [...C.responses.values()].filter((r) => r.exp === exp);
+    const uids = () => [...C.participants.keys()];
+
+    function renderCounts() {
+      const box = $("counts");
+      if (!box) return;
+      const done = [...C.participants.values()].filter((p) => p.done).length;
+      box.textContent = t("live.counts", { joined: C.participants.size, done, docs: C.responses.size });
+    }
+
+    function renderLive() {
+      const s = C.session;
+      if (!s) return;
+      const joinUrl = new URL(`join.html?room=${s.code}`, location.href).href;
+      const parts = [];
+
+      parts.push(card(null, [
+        el("div", { class: "flex flex-wrap items-baseline justify-between gap-3" },
+          el("div", {}, el("div", { class: "text-sm text-slate-500" }, t("live.room")),
+            el("div", { class: "font-mono text-4xl font-bold tracking-widest" }, s.code)),
+          el("div", { class: "text-right text-sm" },
+            el("div", {}, `${s.info?.program || ""} ${s.info?.label || ""} · ${s.info?.date || ""} · ${t(`lang.${s.lang}`)}${s.consent ? " · " + t("live.consentOn") : ""}`),
+            el("div", { id: "counts", class: "font-medium" }))),
+        el("div", { class: "flex flex-wrap gap-2" },
+          btn(t("live.openPresenter"), () => window.open(`present.html?room=${s.code}`, `present-${s.code}`), primary),
+          btn(s.joinOpen ? t("live.joinOn") : t("live.joinOff"), () => guard(() => updateDoc(sref(), { joinOpen: !s.joinOpen })),
+            s.joinOpen ? "border border-emerald-300 bg-emerald-50" : "border border-rose-300 bg-rose-50"),
+          btn(t("live.leave"), () => { localStorage.removeItem("ce:control:room"); detach(); C.chan?.close(); C.code = null; showSetup(); })),
+        el("p", { class: "text-xs text-slate-500 break-all" }, joinUrl)
+      ]));
+
+      if ((s.collect || []).length) {
+        parts.push(card(t("live.collect"), [
+          el("div", { class: "flex flex-wrap items-center gap-2" },
+            el("span", { class: s.collectOpen ? "font-semibold text-emerald-700" : "font-semibold text-rose-700" },
+              s.collectOpen ? t("live.collectOpen") : t("live.collectClosed")),
+            btn(t("live.openCollect"), () => guard(openCollect), primary, !!s.collectOpen),
+            btn(t("live.closeCollect"), () => guard(() => updateDoc(sref(), { collectOpen: false })), "border border-slate-300 bg-white", !s.collectOpen)),
+          el("div", { class: "text-sm text-slate-500" }, t("live.revealHelp")),
+          el("div", { class: "flex flex-wrap gap-2" },
+            s.collect.map((exp) => btn(`${t("live.reveal")} ${exp}`, () => guard(() => revealExp(exp)),
+              s.reveal === exp ? primary : "border border-slate-300 bg-white")),
+            s.reveal ? btn(t("live.hideReveal"), () => guard(() => updateDoc(sref(), { reveal: null }))) : null)
+        ]));
+      }
+
+      if ((s.games || []).length) {
+        const g = s.game;
+        const picker = el("div", { class: "flex flex-wrap gap-2" }, s.games.map((exp) =>
+          btn(exp, () => guard(() => updateDoc(sref(), { game: { exp, phase: "intro", round: 1 }, reveal: null })),
+            g?.exp === exp ? primary : "border border-slate-300 bg-white", !!g && g.exp !== exp)));
+        const phases = ["intro", "open", "locked", "reveal"];
+        const controls = g ? el("div", { class: "space-y-2" },
+          el("div", { class: "flex flex-wrap items-center gap-2 text-sm" },
+            el("span", { class: "font-medium" }, `${g.exp} · ${t("game.round", { r: g.round })} ·`),
+            phases.map((p) => el("span", { class: p === g.phase ? "rounded bg-slate-900 px-2 py-1 text-white" : "px-2 py-1 text-slate-400" }, t(`phase.${p}`))),
+            el("span", { id: "gameCount", class: "text-slate-500" })),
+          el("div", { class: "flex flex-wrap gap-2" },
+            btn(t("live.phaseNext"), () => guard(() => nextPhase(g)), primary, g.phase === "reveal"),
+            btn(t("live.phaseBack"), () => guard(() => prevPhase(g)), "border border-slate-300 bg-white", g.phase === "intro"),
+            btn(t("live.nextRound"), () => guard(() => nextRound(g)), "border border-slate-300 bg-white", g.phase !== "reveal"),
+            btn(t("live.endGame"), () => guard(() => updateDoc(sref(), { game: null }))))) : null;
+        parts.push(card(t("live.games"), [picker, controls]));
+      }
+
+      if (s.quiz) {
+        const q = s.quiz;
+        parts.push(card(t("live.quiz"), [el("div", { class: "flex flex-wrap items-center gap-2" },
+          el("span", { class: "text-sm" }, `${q.id} · ${q.open ? t("live.quizOpen") : q.reveal ? t("live.quizRevealed") : t("live.quizClosed")}`),
+          btn(t("live.quizOpenBtn"), () => guard(() => updateDoc(sref(), { "quiz.open": true, "quiz.reveal": false, game: null, reveal: null })), primary, q.open),
+          btn(t("live.quizCloseBtn"), () => guard(() => updateDoc(sref(), { "quiz.open": false })), "border border-slate-300 bg-white", !q.open),
+          btn(t("live.quizRevealBtn"), () => guard(() => updateDoc(sref(), { "quiz.open": false, "quiz.reveal": true })), "border border-slate-300 bg-white", q.reveal),
+          btn(t("live.quizHideBtn"), () => guard(() => updateDoc(sref(), { "quiz.reveal": false })), "border border-slate-300 bg-white", !q.reveal))]));
+      }
+
+      parts.push(card(t("live.data"), [el("div", { class: "flex flex-wrap gap-2" },
+        btn(t("live.exportCsv"), () => guard(exportCsv)),
+        confirmBtn(t("live.close"), t("live.closeConfirm"), () => guard(closeSession, t("live.closed")), "bg-rose-700 text-white"))]));
+
+      $("live").replaceChildren(...parts);
+      renderCounts();
+      updateGameCount();
+    }
+
+    function updateGameCount() {
+      const g = C.session?.game, node = $("gameCount");
+      if (!g || !node) return;
+      const rk = `r${g.round}`;
+      node.textContent = t("live.chosen", { n: responsesOf(g.exp).filter((r) => r.answers?.[rk] != null).length });
+    }
+
+    async function engineFor(exp) {
+      const config = await loadConfig(C.catalog, exp);
+      return { config, engine: await loadEngine(C.catalog, config.engine) };
+    }
+
+    // Opening the batch assigns conditions for engines that use them (engine B), then opens the batch.
+    async function openCollect() {
+      for (const exp of C.session.collect) {
+        const { config, engine } = await engineFor(exp);
+        const a = engine.assign(uids(), config);
+        if (a != null) await setDoc(doc(sref(), "assignments", exp), a);
+      }
+      await updateDoc(sref(), { collectOpen: true });
+    }
+
+    async function revealExp(exp) {
+      const { config, engine } = await engineFor(exp);
+      const result = engine.aggregate(responsesOf(exp), config);
+      await setDoc(doc(sref(), "results", exp), { result, at: serverTimestamp() });
+      await updateDoc(sref(), { reveal: exp, game: null });
+    }
+
+    async function nextPhase(g) {
+      const { config, engine } = await engineFor(g.exp);
+      if (g.phase === "intro") {
+        const a = engine.assign(uids(), config);
+        if (a != null) await setDoc(doc(sref(), "assignments", g.exp), { ...a, round: g.round });
+        await updateDoc(sref(), { "game.phase": "open" });
+      } else if (g.phase === "open") {
+        await updateDoc(sref(), { "game.phase": "locked" });
+        const result = engine.aggregate(responsesOf(g.exp), config);
+        await setDoc(doc(sref(), "results", g.exp), { result, round: g.round, at: serverTimestamp() });
+      } else if (g.phase === "locked") {
+        const result = engine.aggregate(responsesOf(g.exp), config);
+        await setDoc(doc(sref(), "results", g.exp), { result, round: g.round, at: serverTimestamp() });
+        await updateDoc(sref(), { "game.phase": "reveal" });
+      }
+    }
+
+    async function prevPhase(g) {
+      const back = { open: "intro", locked: "open", reveal: "locked" }[g.phase];
+      if (back) await updateDoc(sref(), { "game.phase": back });
+    }
+
+    async function nextRound(g) {
+      const { config, engine } = await engineFor(g.exp);
+      const max = config.rounds?.max ?? 1;
+      if (g.round >= max) throw new Error(t("live.maxRound", { max }));
+      const a = engine.assign(uids(), config);
+      if (a != null) await setDoc(doc(sref(), "assignments", g.exp), { ...a, round: g.round + 1 });
+      await updateDoc(sref(), { game: { exp: g.exp, phase: "open", round: g.round + 1 } });
+    }
+
+    // ---------- projector feed (BroadcastChannel, no Firestore reads on the projector) ----------
+    async function historyFor(exp) {
+      const s = C.session;
+      const key = poolKey(exp, s.versions?.[exp], s.lang, orderSignature(s, exp));
+      if (!(key in C.history)) {
+        C.history[key] = getDocs(query(collection(db, "archive"), where("keys", "array-contains", key)))
+          .then((qs) => qs.docs.filter((d) => d.data().room !== s.code).map((d) => d.data().results?.[exp]).filter(Boolean))
+          .catch(() => []);
+      }
+      return C.history[key];
+    }
+
+    let pushTimer = null;
+    function pushPresent() {
+      updateGameCount();
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(sendPresent, 150);
+    }
+
+    async function sendPresent() {
+      const s = C.session;
+      if (!s || !C.chan) return;
+      const view = presentView(s);
+      const msg = { type: "state", room: s.code, lang: s.lang, catalog: s.catalog, view,
+        joinUrl: new URL(`join.html?room=${s.code}`, location.href).href,
+        counts: { joined: C.participants.size, done: [...C.participants.values()].filter((p) => p.done).length } };
+      try {
+        if (view === "reveal") {
+          const { config, engine } = await engineFor(s.reveal);
+          msg.reveal = { exp: s.reveal, result: engine.aggregate(responsesOf(s.reveal), config), history: await historyFor(s.reveal) };
+        } else if (view === "game") {
+          const g = s.game, rk = `r${g.round}`;
+          msg.game = { ...g, chosen: responsesOf(g.exp).filter((r) => r.answers?.[rk] != null).length };
+          if (g.phase === "reveal") {
+            const { config, engine } = await engineFor(g.exp);
+            msg.game.result = engine.aggregate(responsesOf(g.exp), config);
+          }
+        } else if (view === "quiz") {
+          const quiz = await loadQuiz(C.catalog, s.quiz.id);
+          const rs = responsesOf(QUIZ_ID);
+          msg.quiz = { id: s.quiz.id, open: s.quiz.open, reveal: s.quiz.reveal, answered: rs.length, title: quiz.title,
+            questions: quiz.questions.map((q, i) => {
+              const answeredQ = rs.filter((r) => r.answers?.[`q${i + 1}`] != null);
+              const correct = answeredQ.filter((r) => r.answers[`q${i + 1}`] === q.answer).length;
+              return { prompt: q.prompt, n: answeredQ.length, pct: answeredQ.length ? Math.round((100 * correct) / answeredQ.length) : 0 };
+            }) };
+        }
+      } catch (e) { msg.error = e.message; }
+      C.chan.postMessage(msg);
+    }
+
+    // ---------- export, close, archive, delete ----------
+    function exportCsv() {
+      const s = C.session;
+      downloadText(`${s.info?.date || today()}_${s.code}.csv`, buildCsv(s, [...C.responses.values()], C.assignments));
+    }
+
+    async function closeSession() {
+      const s = C.session;
+      exportCsv();
+      const results = {};
+      for (const exp of [...(s.collect || []), ...(s.games || [])]) {
+        const { config, engine } = await engineFor(exp);
+        results[exp] = engine.aggregate(responsesOf(exp), config);
+      }
+      const archive = buildArchive(s, [...C.responses.values()], C.assignments, results, C.participants.size);
+      await setDoc(doc(db, "archive", `${s.info?.date || today()}_${s.code}`), { ...archive, closedAt: serverTimestamp() });
+      await updateDoc(sref(), { locked: true, joinOpen: false, collectOpen: false, game: null, reveal: null,
+        ...(s.quiz ? { "quiz.open": false } : {}), closedAt: serverTimestamp() });
+      localStorage.removeItem("ce:control:room");
+    }
+
+    async function deleteRaw(code) {
+      const base = doc(db, "sessions", code);
+      const refs = [];
+      for (const sub of ["participants", "responses", "assignments", "results"]) {
+        (await getDocs(collection(base, sub))).forEach((d) => refs.push(d.ref));
+      }
+      refs.push(base);
+      for (let i = 0; i < refs.length; i += 400) {
+        const batch = writeBatch(db);
+        refs.slice(i, i + 400).forEach((r) => batch.delete(r));
+        await batch.commit();
+      }
+    }
   </script>
 </body>
 </html>

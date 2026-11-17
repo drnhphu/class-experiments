@@ -1,0 +1,10 @@
+{
+  "id": "T03",
+  "engine": "TD",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": { "vi": "Thử trò chơi bốn pha", "en": "Four-phase game test" },
+  "rules": { "vi": "Mỗi vòng, chọn một trong hai nút. Không có ghép cặp.", "en": "Each round, pick one of two buttons. No pairing." },
+  "options": [ { "vi": "Nút trái", "en": "Left button" }, { "vi": "Nút phải", "en": "Right button" } ],
+  "rounds": { "default": 1, "max": 3 }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "T09",
+  "engine": "T",
+  "priority": "P3",
+  "version": "1.0",
+  "concept": { "vi": "Tệp sai cố ý để thử bước chặn", "en": "" },
+  "steps": [
+    { "id": "s1", "prompt": { "vi": "Chỉ có một phương án", "en": "Only one option" }, "options": [ { "vi": "A", "en": "A" } ] }
+  ]
+}

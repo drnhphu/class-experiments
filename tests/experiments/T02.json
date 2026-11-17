@@ -1,0 +1,14 @@
+{
+  "id": "T02",
+  "engine": "T",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": { "vi": "Thử khung lõi: một câu", "en": "Core test: one question" },
+  "steps": [
+    {
+      "id": "s1",
+      "prompt": { "vi": "Câu thử 3: có hay không?", "en": "Test question 3: yes or no?" },
+      "options": [ { "vi": "Có", "en": "Yes" }, { "vi": "Không", "en": "No" } ]
+    }
+  ]
+}

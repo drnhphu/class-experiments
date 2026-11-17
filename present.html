@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Màn chiếu</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.6.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-white text-slate-900 antialiased">
+  <!-- Projector page: second window of the instructor laptop. It never touches Firestore; it renders
+       whatever the control page sends over BroadcastChannel. -->
+  <main id="stage" class="mx-auto flex min-h-screen max-w-6xl flex-col justify-center p-10"></main>
+
+  <script type="module">
+    import qrcode from "https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.mjs";
+    import { loadLang, makeT, pick, el } from "./js/i18n.js";
+    import { loadCatalog, loadConfig, loadEngine } from "./js/catalog.js";
+
+    window.Chart.defaults.font.size = 18; // readable from the back of a classroom
+    const stage = document.getElementById("stage");
+    const room = (new URLSearchParams(location.search).get("room") || "").toUpperCase();
+    let t = makeT(await loadLang("vi"));
+    let lang = "vi", lastKey = null, gotState = false;
+
+    if (!room) stage.replaceChildren(el("p", { class: "text-2xl" }, t("present.noRoom")));
+
+    const chan = new BroadcastChannel(`ce-present-${room}`);
+    chan.onmessage = (ev) => { if (ev.data?.type === "state") { gotState = true; render(ev.data); } };
+    const hello = () => { if (!gotState) { chan.postMessage({ type: "hello" }); setTimeout(hello, 2000); } };
+    hello();
+    if (room) stage.replaceChildren(el("p", { class: "text-2xl text-slate-500" }, t("present.waiting")));
+
+    function qrSvg(text, cell = 8) {
+      const qr = qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      const holder = el("div", { class: "inline-block bg-white p-2" });
+      holder.innerHTML = qr.createSvgTag({ cellSize: cell, margin: 2, scalable: false }); // generated locally, no user input
+      return holder;
+    }
+
+    const big = (text, cls = "") => el("p", { class: `text-5xl font-semibold ${cls}` }, text);
+
+    async function render(m) {
+      // Re-render only when what is shown changes (avoids chart flicker on every count update).
+      const key = JSON.stringify([m.view, m.lang, m.counts, m.reveal, m.game, m.quiz]);
+      if (key === lastKey) return;
+      lastKey = key;
+      if (m.lang !== lang) { lang = m.lang; t = makeT(await loadLang(lang)); document.documentElement.lang = lang; }
+      const catalog = await loadCatalog(m.catalog || "main");
+      const header = el("div", { class: "mb-8 flex items-center justify-between text-xl text-slate-500" },
+        el("span", {}, `${t("present.room")} ${m.room}`),
+        el("span", {}, t("present.joined", { n: m.counts?.joined ?? 0 })));
+      let body;
+
+      if (m.error) body = el("p", { class: "text-2xl text-rose-700" }, m.error);
+      else if (m.view === "lobby") {
+        body = el("div", { class: "flex items-center justify-center gap-16" },
+          qrSvg(m.joinUrl, 10),
+          el("div", { class: "space-y-6" },
+            el("p", { class: "text-3xl" }, t("present.scan")),
+            el("p", { class: "font-mono text-8xl font-bold tracking-widest" }, m.room),
+            el("p", { class: "text-3xl text-slate-600" }, t("present.joined", { n: m.counts?.joined ?? 0 }))));
+      } else if (m.view === "collect") {
+        const { joined = 0, done = 0 } = m.counts || {};
+        const pct = joined ? Math.round((100 * done) / joined) : 0;
+        body = el("div", { class: "space-y-10" },
+          big(t("present.collecting")),
+          el("p", { class: "text-4xl" }, t("present.done", { done, joined })),
+          el("div", { class: "h-6 w-full rounded-full bg-slate-200" }, el("div", { class: "h-6 rounded-full bg-emerald-600", style: `width:${pct}%` })),
+          el("div", { class: "flex items-center gap-6 text-xl text-slate-500" }, qrSvg(m.joinUrl, 4), el("span", {}, t("present.lateJoin"))));
+      } else if (m.view === "reveal") {
+        const config = await loadConfig(catalog, m.reveal.exp);
+        const engine = await loadEngine(catalog, config.engine);
+        body = el("div", { class: "space-y-6" },
+          el("h2", { class: "text-4xl font-semibold" }, pick(config.concept, lang)),
+          engine.renderPresenter(m.reveal.result, config, m.reveal.history || [], { lang, t }));
+      } else if (m.view === "game") {
+        const g = m.game;
+        const config = await loadConfig(catalog, g.exp);
+        const engine = await loadEngine(catalog, config.engine);
+        const title = el("h2", { class: "text-4xl font-semibold" }, `${pick(config.concept, lang)} · ${t("game.round", { r: g.round })}`);
+        if (g.phase === "intro") body = el("div", { class: "space-y-6" }, title, el("p", { class: "whitespace-pre-line text-3xl" }, pick(config.rules || config.scenario, lang)));
+        else if (g.phase === "open") body = el("div", { class: "space-y-6" }, title, big(t("present.chosen", { n: g.chosen, joined: m.counts?.joined ?? 0 })));
+        else if (g.phase === "locked") body = el("div", { class: "space-y-6" }, title, big(t("game.locked")));
+        else body = el("div", { class: "space-y-6" }, title, engine.renderPresenter(g.result, config, [], { lang, t, round: g.round }));
+      } else if (m.view === "quiz") {
+        const q = m.quiz;
+        if (q.open) body = el("div", { class: "space-y-6" }, el("h2", { class: "text-4xl font-semibold" }, pick(q.title, lang)),
+          big(t("present.quizAnswered", { n: q.answered, joined: m.counts?.joined ?? 0 })));
+        else body = el("div", { class: "space-y-6" }, el("h2", { class: "text-4xl font-semibold" }, pick(q.title, lang)),
+          ...q.questions.map((qq, i) => el("div", { class: "space-y-2" },
+            el("p", { class: "text-2xl" }, `${i + 1}. ${pick(qq.prompt, lang)}`),
+            el("div", { class: "flex items-center gap-4" },
+              el("div", { class: "h-8 flex-1 rounded bg-slate-200" }, el("div", { class: "h-8 rounded bg-sky-600", style: `width:${qq.pct}%` })),
+              el("span", { class: "w-48 text-xl" }, t("present.correct", { pct: qq.pct, n: qq.n }))))));
+      } else if (m.view === "closed") {
+        body = big(t("present.closed"));
+      }
+      stage.replaceChildren(header, body || el("p", {}, ""));
+    }
+  </script>
+</body>
+</html>

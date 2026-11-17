@@ -1,0 +1,6 @@
+{
+  "engines": "engines/",
+  "experiments": [],
+  "quizzesBase": "quizzes/",
+  "quizzes": []
+}

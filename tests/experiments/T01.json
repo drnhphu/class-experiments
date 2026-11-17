@@ -1,0 +1,20 @@
+{
+  "id": "T01",
+  "engine": "T",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": { "vi": "Thử khung lõi: hai câu", "en": "Core test: two questions" },
+  "steps": [
+    {
+      "id": "s1",
+      "prompt": { "vi": "Câu thử 1: bạn chọn màu nào?", "en": "Test question 1: which color do you pick?" },
+      "options": [ { "vi": "Xanh", "en": "Blue" }, { "vi": "Đỏ", "en": "Red" }, { "vi": "Vàng", "en": "Yellow" } ]
+    },
+    {
+      "id": "s2",
+      "prompt": { "vi": "Câu thử 2: bạn chọn số nào?", "en": "Test question 2: which number do you pick?" },
+      "options": [ { "vi": "Một", "en": "One" }, { "vi": "Hai", "en": "Two" } ]
+    }
+  ],
+  "benchmark": { "label": { "vi": "Số liệu giả định", "en": "Made-up figures" }, "percents": { "s1": [50, 30, 20], "s2": [60, 40] } }
+}

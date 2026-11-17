@@ -1,0 +1,13 @@
+{
+  "engines": "tests/engines/",
+  "experiments": [
+    { "id": "T01", "file": "T01.json" },
+    { "id": "T02", "file": "T02.json" },
+    { "id": "T03", "file": "T03.json" },
+    { "id": "T09", "file": "T09-invalid.json" }
+  ],
+  "quizzesBase": "tests/quizzes/",
+  "quizzes": [
+    { "id": "quiz-test", "file": "quiz-test.json" }
+  ]
+}

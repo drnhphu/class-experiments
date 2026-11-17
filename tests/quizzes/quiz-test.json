@@ -1,0 +1,18 @@
+{
+  "id": "quiz-test",
+  "version": "1.0",
+  "title": { "vi": "Kiểm tra nhanh (bản thử)", "en": "Quick check (test)" },
+  "questions": [
+    {
+      "prompt": { "vi": "Câu thử A: 2 + 2 bằng mấy?", "en": "Test A: what is 2 + 2?" },
+      "options": [ { "vi": "3", "en": "3" }, { "vi": "4", "en": "4" } ],
+      "answer": 1
+    },
+    {
+      "prompt": { "vi": "Câu thử B: chọn phương án đầu tiên.", "en": "Test B: pick the first option." },
+      "options": [ { "vi": "Đầu tiên", "en": "First" }, { "vi": "Thứ hai", "en": "Second" }, { "vi": "Thứ ba", "en": "Third" } ],
+      "answer": 0
+    }
+  ],
+  "reflection": { "vi": "Một điều bạn sẽ mang về sau buổi hôm nay?", "en": "One thing you will take away from today?" }
+}
