@@ -16,11 +16,11 @@ service cloud.firestore {
     }
 
     // The instructor is one Google account, identified by UID.
-    // Replace the placeholder with the UID shown on control.html after the first Google sign-in.
+    // UID of the instructor account (shown on control.html after Google sign-in).
     function isInstructor() {
       return signedIn()
         && request.auth.token.firebase.sign_in_provider == 'google.com'
-        && request.auth.uid in ['REPLACE_WITH_INSTRUCTOR_UID'];
+        && request.auth.uid in ['e4y8xKvvlHefIiMX0kzpIXNe6JH2'];
     }
 
     function sessionData(code) {
