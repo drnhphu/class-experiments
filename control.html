@@ -68,7 +68,7 @@
     }
 
     async function guard(fn, okText) {
-      try { await fn(); if (okText) setStatus(okText, "ok"); }
+      try { await fn(); setStatus(okText || "", okText ? "ok" : "muted"); } // a success clears an earlier error
       catch (e) { console.error(e); setStatus(`${t("err.action")} (${e.code || e.message})`, "bad"); }
     }
 
