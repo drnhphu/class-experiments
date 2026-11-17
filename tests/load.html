@@ -86,7 +86,11 @@
         for (let b = 0; b < N; b += 10) phones.push(...await Promise.all(Array.from({ length: Math.min(10, N - b) }, (_, k) => makePhone(b + k + 1))));
         log(`Đăng nhập xong sau ${Math.round(performance.now() - t0)} ms. Mã người dùng khác nhau: ${new Set(phones.map((p) => p.uid)).size}/${N}.`);
 
-        await Promise.all(phones.map((p) => setDoc(doc(p.db, "sessions", code, "participants", p.uid), { joinedAt: serverTimestamp(), lang: "vi" })));
+        const useLite = $("lite").checked;
+        log(useLite ? "Máy giả lập ghi bằng yêu cầu rời (Firestore Lite)." : "Máy giả lập ghi bằng thư viện đầy đủ.");
+        await Promise.all(phones.map((p) => useLite
+          ? lite.setDoc(lite.doc(p.ldb, "sessions", code, "participants", p.uid), { joinedAt: lite.serverTimestamp(), lang: "vi" })
+          : setDoc(doc(p.db, "sessions", code, "participants", p.uid), { joinedAt: serverTimestamp(), lang: "vi" })));
         log(`${N} máy đã vào phòng.`);
 
         // 2) Every phone listens to the session doc and timestamps each new seq it sees.
@@ -99,8 +103,6 @@
         })));
         log("Mọi máy đã nghe trạng thái phòng.");
 
-        const useLite = $("lite").checked;
-        log(useLite ? "Máy giả lập ghi bằng yêu cầu rời (Firestore Lite)." : "Máy giả lập ghi bằng thư viện đầy đủ.");
         const write = (p, exp, answers) => {
           const payload = (ts) => ({ uid: p.uid, exp, answers, times: Object.fromEntries(Object.keys(answers).map((k) => [k, 1000])), updatedAt: ts });
           const id = responseId(p.uid, exp);
@@ -115,7 +117,7 @@
           log(`${label}: ${N} máy ghi đồng loạt xong sau ${Math.round(performance.now() - ts)} ms.`);
         };
 
-        // 3) Ten real state changes. Writes happen while the matching part is open.
+        // 3) Nine real state changes. Writes happen while the matching part is open.
         let seq = 0;
         const change = async (label, fields) => {
           seq++;
