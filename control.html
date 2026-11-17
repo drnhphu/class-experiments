@@ -468,7 +468,13 @@
       await setDoc(doc(db, "archive", `${s.info?.date || today()}_${s.code}`), { ...archive, closedAt: serverTimestamp() });
       await updateDoc(sref(), { locked: true, joinOpen: false, collectOpen: false, game: null, reveal: null,
         ...(s.quiz ? { "quiz.open": false } : {}), closedAt: serverTimestamp() });
+      // Let the projector show the closing screen before the channel goes away, then return to setup.
+      await new Promise((r) => setTimeout(r, 1500));
       localStorage.removeItem("ce:control:room");
+      detach();
+      C.chan?.close();
+      C.code = null;
+      showSetup();
     }
 
     async function deleteRaw(code) {

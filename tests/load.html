@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thử tải 60 máy</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!--
+    Phase 1 gate: load test with N simulated phones (named Firebase apps = separate anonymous users).
+    The default app must be signed in as the instructor. It creates a throwaway room, drives 10 real state
+    changes, and every phone records when each change reaches it (same clock: one browser tab).
+    Phones write their answers in bursts while each part is open; the instructor then counts every document.
+    Pass: every change reaches every phone in under 2 s, and no answer is lost. The room is deleted at the end.
+    Anonymous users persist per app name, so re-runs reuse the same N accounts (no new sign-ups).
+  -->
+  <main class="mx-auto max-w-3xl p-4 space-y-4">
+    <h1 class="text-xl font-semibold">Thử tải: máy giả lập, đổi trạng thái và ghi đồng loạt</h1>
+    <div class="flex items-center gap-2">
+      <label class="text-sm">Số máy <input id="n" type="number" value="60" min="1" max="80" class="w-20 rounded border border-slate-300 px-2 py-1"></label>
+      <button id="signIn" class="hidden rounded-lg border border-slate-300 bg-white px-4 py-2">Đăng nhập Google (giảng viên)</button>
+      <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40" disabled>Chạy thử tải</button>
+    </div>
+    <p id="log" class="whitespace-pre-line text-xs text-slate-600"></p>
+    <div id="verdict" class="hidden rounded-xl p-4 font-semibold"></div>
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500"><tr><th>#</th><th>Đổi trạng thái</th><th>Máy nhận</th><th>Trung vị (ms)</th><th>Chậm nhất (ms)</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="writes" class="text-sm"></div>
+  </main>
+
+  <script type="module">
+    import {
+      auth, db, firebaseConfig, initializeApp, getAuth, getFirestore, signInAnonymously, onAuthStateChanged,
+      GoogleAuthProvider, signInWithPopup, doc, collection, query, where, getDocsFromServer, setDoc, updateDoc,
+      onSnapshot, serverTimestamp, writeBatch, getDocs
+    } from "../js/firebase.js";
+    import { newRoomCode, responseId } from "../js/room.js";
+
+    const $ = (id) => document.getElementById(id);
+    const LIMIT_MS = 2000;
+    const log = (s) => { $("log").textContent += s + "\n"; };
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    onAuthStateChanged(auth, (u) => {
+      const ok = !!u && u.providerData.some((p) => p.providerId === "google.com");
+      $("signIn").classList.toggle("hidden", ok);
+      $("run").disabled = !ok;
+    });
+    $("signIn").onclick = () => signInWithPopup(auth, new GoogleAuthProvider());
+
+    async function makePhone(i) {
+      const app = initializeApp(firebaseConfig, `load-${String(i).padStart(2, "0")}`);
+      const a = getAuth(app);
+      await a.authStateReady();
+      if (!a.currentUser) await signInAnonymously(a);
+      return { i, uid: a.currentUser.uid, db: getFirestore(app), seen: {}, unsub: null };
+    }
+
+    $("run").onclick = async () => {
+      $("run").disabled = true; $("rows").innerHTML = ""; $("writes").innerHTML = ""; $("log").textContent = "";
+      $("verdict").classList.add("hidden");
+      const N = Math.max(1, Math.min(80, Number($("n").value) || 60));
+      const code = newRoomCode();
+      const sref = doc(db, "sessions", code);
+      const phones = [];
+      const sent = {};          // seq -> performance.now() just before the instructor's write
+      let writeFail = 0, writeOk = 0;
+      let pass = true;
+      try {
+        // 1) Room and phones
+        await setDoc(sref, { owner: auth.currentUser.uid, createdAt: serverTimestamp(), appVersion: "load-test", catalog: "test", lang: "vi",
+          info: { program: "other", label: "load test", date: "2000-01-01" }, collect: ["T01", "T02"], order: ["T01#s1", "T01#s2", "T02#s1"],
+          games: ["T03"], versions: { T01: "1.0", T02: "1.0", T03: "1.0" }, consent: false,
+          quiz: { id: "quiz-test", version: "1.0", open: false, reveal: false },
+          joinOpen: true, collectOpen: false, reveal: null, game: null, locked: false, seq: 0 });
+        log(`Phòng thử ${code}. Tạo ${N} máy (đăng nhập ẩn danh theo lô 10)…`);
+        const t0 = performance.now();
+        for (let b = 0; b < N; b += 10) phones.push(...await Promise.all(Array.from({ length: Math.min(10, N - b) }, (_, k) => makePhone(b + k + 1))));
+        log(`Đăng nhập xong sau ${Math.round(performance.now() - t0)} ms. Mã người dùng khác nhau: ${new Set(phones.map((p) => p.uid)).size}/${N}.`);
+
+        await Promise.all(phones.map((p) => setDoc(doc(p.db, "sessions", code, "participants", p.uid), { joinedAt: serverTimestamp(), lang: "vi" })));
+        log(`${N} máy đã vào phòng.`);
+
+        // 2) Every phone listens to the session doc and timestamps each new seq it sees.
+        await Promise.all(phones.map((p) => new Promise((resolve) => {
+          p.unsub = onSnapshot(doc(p.db, "sessions", code), (snap) => {
+            const seq = snap.data()?.seq;
+            if (seq != null && !(seq in p.seen)) p.seen[seq] = performance.now();
+            resolve();
+          });
+        })));
+        log("Mọi máy đã nghe trạng thái phòng.");
+
+        const write = (p, exp, answers) => setDoc(doc(p.db, "sessions", code, "responses", responseId(p.uid, exp)),
+          { uid: p.uid, exp, answers, times: Object.fromEntries(Object.keys(answers).map((k) => [k, 1000])), updatedAt: serverTimestamp() }, { merge: true })
+          .then(() => { writeOk++; }, (e) => { writeFail++; console.error(e); });
+        const burst = async (label, fn) => {
+          const ts = performance.now();
+          await Promise.all(phones.map(fn));
+          log(`${label}: ${N} máy ghi đồng loạt xong sau ${Math.round(performance.now() - ts)} ms.`);
+        };
+
+        // 3) Ten real state changes. Writes happen while the matching part is open.
+        let seq = 0;
+        const change = async (label, fields) => {
+          seq++;
+          sent[seq] = performance.now();
+          await updateDoc(sref, { ...fields, seq });
+          const deadline = performance.now() + 8000;
+          while (phones.some((p) => !(seq in p.seen)) && performance.now() < deadline) await wait(50);
+          const lat = phones.filter((p) => seq in p.seen).map((p) => p.seen[seq] - sent[seq]).sort((a, b) => a - b);
+          const got = lat.length, med = lat[Math.floor(lat.length / 2)] ?? NaN, max = lat[lat.length - 1] ?? NaN;
+          const ok = got === N && max < LIMIT_MS;
+          pass &&= ok;
+          const tr = document.createElement("tr");
+          tr.className = "border-t border-slate-200";
+          [seq, label, `${got}/${N}`, Math.round(med), Math.round(max), ok ? "✓" : "✗"].forEach((v, k) => {
+            const td = document.createElement("td"); td.textContent = String(v);
+            td.className = "py-1 pr-2" + (k === 5 ? (ok ? " text-emerald-700" : " font-bold text-rose-700") : "");
+            tr.append(td);
+          });
+          $("rows").append(tr);
+        };
+
+        await change("Mở phiên thu", { collectOpen: true });
+        await burst("T01 câu 1", (p) => write(p, "T01", { s1: p.i % 3 }));
+        await burst("T01 câu 2", (p) => write(p, "T01", { s2: p.i % 2 }));
+        await burst("T02", (p) => write(p, "T02", { s1: p.i % 2 }));
+        await change("Khóa phiên thu", { collectOpen: false });
+        await change("Mở kết quả T01", { reveal: "T01" });
+        await change("Trò chơi T03: giới thiệu", { reveal: null, game: { exp: "T03", phase: "intro", round: 1 } });
+        await change("Trò chơi T03: mở", { "game.phase": "open" });
+        await burst("T03 vòng 1", (p) => write(p, "T03", { r1: p.i % 2 }));
+        await change("Trò chơi T03: khóa", { "game.phase": "locked" });
+        await change("Trò chơi T03: kết quả", { "game.phase": "reveal" });
+        await change("Mở kiểm tra nhanh", { game: null, "quiz.open": true });
+        await burst("Kiểm tra nhanh", (p) => write(p, "Q00", { q1: 1, q2: p.i % 3 }));
+        await change("Khóa kiểm tra nhanh", { "quiz.open": false });
+
+        // 4) Count every answer as the instructor.
+        const docs = (await getDocsFromServer(collection(sref, "responses"))).docs.map((d) => d.data());
+        const expected = N * 4;
+        const t01Complete = docs.filter((d) => d.exp === "T01" && d.answers.s1 != null && d.answers.s2 != null).length;
+        const byExp = Object.fromEntries(["T01", "T02", "T03", "Q00"].map((e) => [e, docs.filter((d) => d.exp === e).length]));
+        const lost = expected - docs.length + (N - t01Complete);
+        const okWrites = writeFail === 0 && lost === 0;
+        pass &&= okWrites;
+        $("writes").replaceChildren(Object.assign(document.createElement("p"), {
+          className: okWrites ? "text-emerald-700" : "font-bold text-rose-700",
+          textContent: `Ghi: ${writeOk} thành công, ${writeFail} lỗi. Tài liệu trên máy chủ: ${docs.length}/${expected} ` +
+            `(T01 ${byExp.T01}, T02 ${byExp.T02}, T03 ${byExp.T03}, Q00 ${byExp.Q00}); T01 đủ cả hai câu: ${t01Complete}/${N}. Mất: ${lost}.`
+        }));
+
+        // 5) Pooling query used by the projector's "earlier classes" column.
+        const pooled = await getDocsFromServer(query(collection(db, "archive"), where("keys", "array-contains", "T01|1.0|vi|T01>T02")));
+        log(`Truy vấn cộng dồn các lớp trước (T01|1.0|vi|T01>T02): ${pooled.size} phiên trong kho so sánh.`);
+
+        const v = $("verdict");
+        v.classList.remove("hidden");
+        v.className = `rounded-xl p-4 font-semibold ${pass ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`;
+        v.textContent = `Điều kiện qua cửa Giai đoạn 1 (${N} máy): ${pass ? "ĐẠT" : "CHƯA ĐẠT"}.`;
+      } catch (e) {
+        log(`Lỗi khi chạy: ${e.code || e.message}`);
+      } finally {
+        phones.forEach((p) => p.unsub?.());
+        try {
+          const refs = [];
+          for (const sub of ["participants", "responses", "assignments", "results"]) (await getDocs(collection(sref, sub))).forEach((d) => refs.push(d.ref));
+          refs.push(sref);
+          for (let i = 0; i < refs.length; i += 400) { const b = writeBatch(db); refs.slice(i, i + 400).forEach((r) => b.delete(r)); await b.commit(); }
+          log(`Đã xóa phòng thử (${refs.length} tài liệu).`);
+        } catch (e) { log(`Chưa xóa được phòng thử: ${e.code || e.message}`); }
+        $("run").disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

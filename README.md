@@ -57,6 +57,7 @@ Kiểm tra nhanh cuối buổi ghi vào `responses` với mã thí nghiệm cố
 ## Thử khung lõi bằng danh mục thử
 
 - `control.html?catalog=test` dùng danh mục `tests/experiments/` (T01, T02 thu theo nhịp; T03 trò chơi; T09 sai cố ý để thấy bước chặn) và bộ `quiz-test`.
+- `tests/load.html`: thử tải (điều kiện qua cửa Giai đoạn 1). Mở trên trình duyệt đã đăng nhập giảng viên; trang tạo N máy giả lập ẩn danh (mặc định 60, dùng lại cùng tài khoản ở các lần sau), đổi trạng thái 10 lần, đo thời gian tới từng máy, đếm lại mọi câu trả lời, rồi xóa phòng thử.
 - `tests/rules.html`: mở trên trình duyệt đã đăng nhập giảng viên, bấm Chạy kiểm thử. Trang tự tạo một phòng thử, đi qua mọi trạng thái, chạy các phép thử quy tắc bằng ba người dùng ẩn danh, rồi xóa phòng thử.
 
 ## Giới hạn gói miễn phí cần nhớ
