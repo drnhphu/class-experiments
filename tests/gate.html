@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kiểm thử cửa Giai đoạn 0</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!--
+    Phase 0 gate test, run against the real Firebase project.
+    Two named Firebase apps act as two separate phones (two anonymous users, A and B).
+    Gate: A can write a response while the batch is open; B cannot read it (by id or by listing).
+    Extra checks probe each clause of firestore.rules. Run once with the batch open, once closed.
+  -->
+  <main class="mx-auto max-w-2xl p-4 space-y-4">
+    <h1 class="text-xl font-semibold">Kiểm thử điều kiện qua cửa, Giai đoạn 0</h1>
+    <div class="flex gap-2">
+      <input id="roomInput" maxlength="6" autocomplete="off"
+             class="w-32 rounded-lg border border-slate-300 px-3 py-2 font-mono uppercase tracking-widest" placeholder="Mã phòng">
+      <button id="runBtn" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Chạy kiểm thử</button>
+    </div>
+    <p id="who" class="text-xs text-slate-500"></p>
+    <div id="verdict" class="hidden rounded-xl p-4 font-semibold"></div>
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500">
+        <tr><th class="w-8">#</th><th>Phép thử</th><th class="w-20">Kỳ vọng</th><th class="w-24">Thực tế</th><th class="w-6"></th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+
+  <script type="module">
+    import {
+      firebaseConfig, configMissing, initializeApp, getAuth, getFirestore, signInAnonymously,
+      doc, collection, getDocFromServer, getDocsFromServer, setDoc, updateDoc, serverTimestamp, Timestamp
+    } from "../js/firebase.js";
+    import { ROOM_RE, normalizeRoomCode, newRoomCode, responseId } from "../js/room.js";
+
+    const TEST_EXP = "T00";
+    const TIMEOUT_MS = 10000;
+    const $ = (id) => document.getElementById(id);
+
+    if (configMissing) {
+      $("who").textContent = "Chưa điền cấu hình Firebase trong js/firebase-config.js.";
+      throw new Error("Firebase config missing");
+    }
+
+    // Two independent "phones": separate app instances keep separate auth state and caches.
+    async function makePhone(name) {
+      const app = initializeApp(firebaseConfig, name);
+      const auth = getAuth(app);
+      await auth.authStateReady();
+      if (!auth.currentUser) await signInAnonymously(auth);
+      return { name, uid: auth.currentUser.uid, db: getFirestore(app) };
+    }
+
+    function withTimeout(promise) {
+      return Promise.race([
+        promise,
+        new Promise((_, rej) => setTimeout(() => rej({ code: "timeout" }), TIMEOUT_MS))
+      ]);
+    }
+
+    // Runs one operation and classifies it as allowed / denied / other error.
+    async function outcome(fn) {
+      try { await withTimeout(fn()); return "allowed"; }
+      catch (e) { return e.code === "permission-denied" ? "denied" : `lỗi: ${e.code || e.message}`; }
+    }
+
+    const label = { allowed: "Cho phép", denied: "Bị chặn" };
+    const goodPayload = (uid, exp = TEST_EXP) => ({
+      uid, exp, answers: { choice: 3 }, times: { choice: 1200 }, updatedAt: serverTimestamp()
+    });
+
+    function addRow(i, text, expected, actual, isGate) {
+      const pass = expected === actual;
+      const tr = document.createElement("tr");
+      tr.className = `border-t border-slate-200 ${isGate ? "bg-sky-50" : ""}`;
+      [String(i), (isGate ? "[Cửa] " : "") + text, label[expected], label[actual] || actual, pass ? "✓" : "✗"]
+        .forEach((t, k) => {
+          const td = document.createElement("td");
+          td.textContent = t;
+          td.className = "py-1 pr-2 align-top" + (k === 4 ? (pass ? " text-emerald-700" : " text-rose-700 font-bold") : "");
+          tr.appendChild(td);
+        });
+      $("rows").appendChild(tr);
+      return pass;
+    }
+
+    $("runBtn").addEventListener("click", run);
+    const fromUrl = normalizeRoomCode(new URLSearchParams(location.search).get("room"));
+    if (fromUrl) $("roomInput").value = fromUrl;
+
+    async function run() {
+      const code = normalizeRoomCode($("roomInput").value);
+      if (!ROOM_RE.test(code)) { $("who").textContent = "Mã phòng gồm 6 ký tự."; return; }
+      $("runBtn").disabled = true;
+      $("rows").innerHTML = "";
+      $("verdict").classList.add("hidden");
+
+      try {
+        const A = window.__phoneA ||= await makePhone("phoneA");
+        const B = window.__phoneB ||= await makePhone("phoneB");
+        $("who").textContent = `Máy A: ${A.uid.slice(0, 8)}…   Máy B: ${B.uid.slice(0, 8)}…   (hai người dùng ẩn danh khác nhau: ${A.uid !== B.uid ? "đúng" : "SAI"})`;
+
+        const sessA = doc(A.db, "sessions", code);
+        const snap = await getDocFromServer(sessA);
+        if (!snap.exists()) { $("who").textContent += "   Không tìm thấy phòng."; return; }
+        const s = snap.data();
+        const open = s.locked === false && s.collectOpen === true && (s.collect || []).includes(TEST_EXP);
+        const writeExpect = open ? "allowed" : "denied";
+
+        const aRespInA = doc(A.db, "sessions", code, "responses", responseId(A.uid, TEST_EXP));
+        const aRespInB = doc(B.db, "sessions", code, "responses", responseId(A.uid, TEST_EXP));
+        const bResp = (exp = TEST_EXP) => doc(B.db, "sessions", code, "responses", responseId(B.uid, exp));
+
+        const tests = [
+          ["A đọc trạng thái phòng", "allowed", () => getDocFromServer(sessA)],
+          [`A ghi câu trả lời của mình (phiên thu ${open ? "mở" : "khóa"})`, writeExpect,
+            () => setDoc(aRespInA, goodPayload(A.uid)), open],
+          ["B đọc câu trả lời của A theo mã tài liệu", "denied", () => getDocFromServer(aRespInB), true],
+          ["B đọc danh sách mọi câu trả lời trong phòng", "denied",
+            () => getDocsFromServer(collection(B.db, "sessions", code, "responses")), true],
+          ["A đọc lại câu trả lời của chính mình (chỉ giảng viên được đọc)", "denied", () => getDocFromServer(aRespInA)],
+          [`B ghi câu trả lời hợp lệ của mình (đối chứng, phiên thu ${open ? "mở" : "khóa"})`, writeExpect,
+            () => setDoc(bResp(), goodPayload(B.uid))],
+          ["B ghi đè vào tài liệu của A", "denied", () => setDoc(aRespInB, goodPayload(A.uid))],
+          ["B ghi kèm trường lạ (name)", "denied", () => setDoc(bResp(), { ...goodPayload(B.uid), name: "x" })],
+          ["B ghi thời gian do máy tự đặt thay vì thời gian máy chủ", "denied",
+            () => setDoc(bResp(), { ...goodPayload(B.uid), updatedAt: Timestamp.now() })],
+          ["B ghi thí nghiệm không có trong phiên (E99)", "denied", () => setDoc(bResp("E99"), goodPayload(B.uid, "E99"))],
+          ["B sửa trạng thái phòng", "denied", () => updateDoc(doc(B.db, "sessions", code), { collectOpen: !s.collectOpen })],
+          ["B tạo phòng mới", "denied", () => setDoc(doc(B.db, "sessions", newRoomCode()), { owner: B.uid })],
+          ["B liệt kê danh sách phòng", "denied", () => getDocsFromServer(collection(B.db, "sessions"))],
+          ["B đọc kho so sánh (archive)", "denied", () => getDocFromServer(doc(B.db, "archive", "probe"))],
+          ["B ghi bảng chia điều kiện (assignments)", "denied",
+            () => setDoc(doc(B.db, "sessions", code, "assignments", "E05"), { x: 1 })],
+          ["B đọc kết quả tổng hợp (results)", "allowed", () => getDocFromServer(doc(B.db, "sessions", code, "results", "E05"))]
+        ];
+
+        let allPass = true, gatePass = open;
+        for (let i = 0; i < tests.length; i++) {
+          const [text, expected, fn, isGate] = tests[i];
+          const actual = await outcome(fn);
+          const pass = addRow(i + 1, text, expected, actual, isGate);
+          allPass &&= pass;
+          if (isGate) gatePass &&= pass;
+        }
+
+        const v = $("verdict");
+        v.classList.remove("hidden");
+        if (!open) {
+          v.className = "rounded-xl p-4 font-semibold bg-amber-50 text-amber-800";
+          v.textContent = `Phiên thu đang khóa: ${allPass ? "mọi phép thử đúng kỳ vọng" : "CÓ phép thử sai kỳ vọng"}. ` +
+                          "Mở phiên thu trên trang điều khiển rồi chạy lại để kiểm tra điều kiện qua cửa.";
+        } else {
+          v.className = `rounded-xl p-4 font-semibold ${gatePass && allPass ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`;
+          v.textContent = `Điều kiện qua cửa: ${gatePass ? "ĐẠT" : "CHƯA ĐẠT"}. Phép thử phụ: ${allPass ? "tất cả đúng kỳ vọng" : "có phép thử sai kỳ vọng"}.`;
+        }
+      } catch (e) {
+        $("who").textContent = `Lỗi khi chạy: ${e.code || e.message}`;
+      } finally {
+        $("runBtn").disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

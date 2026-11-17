@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bảng điều khiển giảng viên</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!-- Phase 0 instructor page: Google sign-in, create a test room, open/close the opening batch, watch responses. -->
+  <main class="mx-auto max-w-3xl p-6 space-y-6">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-semibold">Bảng điều khiển (Giai đoạn 0)</h1>
+      <div class="text-right text-sm">
+        <div id="account" class="text-slate-600"></div>
+        <button id="signInBtn" class="mt-1 rounded-lg bg-slate-900 px-4 py-2 text-white">Đăng nhập Google</button>
+        <button id="signOutBtn" class="mt-1 hidden rounded-lg border border-slate-300 px-3 py-1">Đăng xuất</button>
+      </div>
+    </header>
+
+    <p id="status" class="text-sm text-slate-600"></p>
+
+    <section id="bootstrap" class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm space-y-2">
+      <p class="font-medium">Tài khoản này chưa có quyền giảng viên trong quy tắc bảo mật.</p>
+      <p>UID của tài khoản:</p>
+      <div class="flex gap-2">
+        <code id="uidBox" class="flex-1 rounded bg-white px-2 py-1 font-mono break-all"></code>
+        <button id="copyUid" class="rounded border border-slate-300 bg-white px-3">Chép</button>
+      </div>
+      <p>Thay <code>REPLACE_WITH_INSTRUCTOR_UID</code> trong firestore.rules bằng UID này, bấm Publish trong Firebase console, rồi tải lại trang.</p>
+    </section>
+
+    <section id="roomPanel" class="hidden space-y-4">
+      <div class="flex items-center gap-3">
+        <button id="createBtn" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Tạo phòng thử</button>
+        <span class="text-sm text-slate-500">Phòng thử chỉ có câu kết nối T00.</span>
+      </div>
+
+      <div id="roomInfo" class="hidden rounded-xl bg-white p-5 shadow-sm space-y-3">
+        <div class="flex items-baseline justify-between">
+          <div>
+            <div class="text-sm text-slate-500">Mã phòng</div>
+            <div id="roomCode" class="font-mono text-4xl font-bold tracking-widest"></div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm text-slate-500">Phiên thu</div>
+            <div id="collectState" class="text-lg font-semibold"></div>
+          </div>
+        </div>
+        <div class="flex gap-2">
+          <button id="openBtn" class="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-40">Mở phiên thu</button>
+          <button id="closeBtn" class="rounded-lg bg-rose-700 px-4 py-2 text-white disabled:opacity-40">Khóa phiên thu</button>
+        </div>
+        <div class="text-sm space-y-1">
+          <div>Link cho điện thoại: <a id="joinLink" class="text-sky-700 underline break-all" target="_blank"></a></div>
+          <div>Trang kiểm thử cửa: <a id="gateLink" class="text-sky-700 underline break-all" target="_blank"></a></div>
+        </div>
+      </div>
+
+      <div id="respBox" class="hidden rounded-xl bg-white p-5 shadow-sm">
+        <div class="mb-2 font-medium">Câu trả lời đã nhận: <span id="respCount">0</span></div>
+        <table class="w-full text-sm">
+          <thead class="text-left text-slate-500"><tr><th>Tài liệu</th><th>Câu trả lời</th><th>Thời gian (ms)</th></tr></thead>
+          <tbody id="respRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      auth, db, configMissing, APP_VERSION, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut,
+      doc, collection, query, limit, getDoc, getDocs, setDoc, updateDoc, onSnapshot, serverTimestamp
+    } from "./js/firebase.js";
+    import { newRoomCode } from "./js/room.js";
+
+    const $ = (id) => document.getElementById(id);
+    let unsubs = [];
+    let roomCode = null;
+
+    function setStatus(text, tone = "muted") {
+      const tones = { muted: "text-slate-600", ok: "text-emerald-700", bad: "text-rose-700" };
+      $("status").className = `text-sm ${tones[tone]}`;
+      $("status").textContent = text;
+    }
+
+    if (configMissing) {
+      setStatus("Chưa điền cấu hình Firebase trong js/firebase-config.js.", "bad");
+      throw new Error("Firebase config missing");
+    }
+
+    $("signInBtn").addEventListener("click", async () => {
+      try { await signInWithPopup(auth, new GoogleAuthProvider()); }
+      catch (e) { setStatus(`Đăng nhập lỗi (${e.code}).`, "bad"); }
+    });
+    $("signOutBtn").addEventListener("click", () => signOut(auth));
+    $("copyUid").addEventListener("click", () => navigator.clipboard.writeText($("uidBox").textContent));
+
+    onAuthStateChanged(auth, async (user) => {
+      unsubs.forEach((u) => u()); unsubs = [];
+      const isGoogle = user && user.providerData.some((p) => p.providerId === "google.com");
+      $("signInBtn").classList.toggle("hidden", !!isGoogle);
+      $("signOutBtn").classList.toggle("hidden", !isGoogle);
+      $("account").textContent = isGoogle ? user.email : "";
+      $("bootstrap").classList.add("hidden");
+      $("roomPanel").classList.add("hidden");
+      if (!isGoogle) { setStatus("Đăng nhập bằng tài khoản Google của giảng viên."); return; }
+
+      // Listing sessions is allowed for the instructor only, so a 1-document query tells us the role.
+      try {
+        await getDocs(query(collection(db, "sessions"), limit(1)));
+        setStatus("Đã xác nhận quyền giảng viên.", "ok");
+        $("roomPanel").classList.remove("hidden");
+      } catch (e) {
+        if (e.code === "permission-denied") {
+          $("uidBox").textContent = user.uid;
+          $("bootstrap").classList.remove("hidden");
+          setStatus("");
+        } else {
+          setStatus(`Không kiểm tra được quyền (${e.code}).`, "bad");
+        }
+      }
+    });
+
+    $("createBtn").addEventListener("click", async () => {
+      $("createBtn").disabled = true;
+      try {
+        let code;
+        for (let i = 0; i < 5; i++) { // retry on the rare collision
+          code = newRoomCode();
+          if (!(await getDoc(doc(db, "sessions", code))).exists()) break;
+        }
+        await setDoc(doc(db, "sessions", code), {
+          owner: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+          appVersion: APP_VERSION,
+          lang: "vi",
+          collect: ["T00"],   // opening batch, in order
+          games: [],          // engine D experiments
+          collectOpen: false,
+          reveal: null,       // experiment whose results are shown
+          game: null,         // { exp, phase, round } while a game runs
+          locked: false       // true after the session is closed
+        });
+        attachRoom(code);
+        setStatus(`Đã tạo phòng ${code}.`, "ok");
+      } catch (e) {
+        setStatus(`Tạo phòng lỗi (${e.code || e.message}).`, "bad");
+      } finally {
+        $("createBtn").disabled = false;
+      }
+    });
+
+    function attachRoom(code) {
+      unsubs.forEach((u) => u()); unsubs = [];
+      roomCode = code;
+      $("roomCode").textContent = code;
+      const join = new URL(`join.html?room=${code}`, location.href).href;
+      const gate = new URL(`tests/gate.html?room=${code}`, location.href).href;
+      $("joinLink").href = join; $("joinLink").textContent = join;
+      $("gateLink").href = gate; $("gateLink").textContent = gate;
+      $("roomInfo").classList.remove("hidden");
+      $("respBox").classList.remove("hidden");
+
+      unsubs.push(onSnapshot(doc(db, "sessions", code), (snap) => {
+        const open = !!snap.data()?.collectOpen;
+        $("collectState").textContent = open ? "Đang mở" : "Đang khóa";
+        $("collectState").className = `text-lg font-semibold ${open ? "text-emerald-700" : "text-rose-700"}`;
+        $("openBtn").disabled = open;
+        $("closeBtn").disabled = !open;
+      }));
+
+      unsubs.push(onSnapshot(collection(db, "sessions", code, "responses"), (snap) => {
+        $("respCount").textContent = snap.size;
+        $("respRows").innerHTML = "";
+        snap.forEach((d) => {
+          const r = d.data();
+          const tr = document.createElement("tr");
+          tr.className = "border-t border-slate-100";
+          // Student data is untrusted: set textContent only, never innerHTML.
+          const cells = [`${d.id.slice(0, 6)}…_${r.exp}`, JSON.stringify(r.answers), String(r.times?.choice ?? "")];
+          cells.forEach((text, i) => {
+            const td = document.createElement("td");
+            td.textContent = text;
+            if (i === 0) td.className = "py-1 font-mono";
+            tr.appendChild(td);
+          });
+          $("respRows").appendChild(tr);
+        });
+      }, (e) => setStatus(`Không đọc được câu trả lời (${e.code}).`, "bad")));
+    }
+
+    $("openBtn").addEventListener("click", () => updateDoc(doc(db, "sessions", roomCode), { collectOpen: true }));
+    $("closeBtn").addEventListener("click", () => updateDoc(doc(db, "sessions", roomCode), { collectOpen: false }));
+  </script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vào phòng thí nghiệm</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!-- Phase 0 student page: anonymous sign-in, join a room, write one test answer (T00). -->
+  <main class="mx-auto max-w-sm p-4 space-y-4">
+    <h1 class="text-xl font-semibold">Thí nghiệm trên lớp</h1>
+    <p id="status" class="text-sm text-slate-600">Đang kết nối…</p>
+
+    <section id="joinBox" class="hidden space-y-2">
+      <label for="roomInput" class="block text-sm font-medium">Mã phòng</label>
+      <input id="roomInput" inputmode="text" autocomplete="off" autocapitalize="characters" maxlength="6"
+             class="w-full rounded-lg border border-slate-300 px-3 py-3 text-center text-2xl tracking-widest uppercase"
+             placeholder="ABC234">
+      <button id="joinBtn" class="w-full rounded-lg bg-slate-900 py-3 text-white font-medium disabled:opacity-40">Vào phòng</button>
+    </section>
+
+    <section id="roomBox" class="hidden space-y-3">
+      <p class="text-sm">Phòng <span id="roomLabel" class="font-mono font-semibold"></span></p>
+      <div class="rounded-xl bg-white p-4 shadow-sm space-y-3">
+        <p class="font-medium">Câu thử kết nối: chọn một số bất kỳ.</p>
+        <div id="choices" class="grid grid-cols-5 gap-2"></div>
+      </div>
+      <p id="sendMsg" class="text-sm"></p>
+    </section>
+
+    <p id="who" class="pt-6 text-xs text-slate-400"></p>
+  </main>
+
+  <script type="module">
+    import {
+      auth, db, configMissing, signInAnonymously, onAuthStateChanged,
+      doc, getDoc, setDoc, serverTimestamp
+    } from "./js/firebase.js";
+    import { ROOM_RE, normalizeRoomCode, responseId } from "./js/room.js";
+
+    const TEST_EXP = "T00"; // Phase 0 connectivity item; real experiments come from experiments/*.json later
+    const $ = (id) => document.getElementById(id);
+    let roomCode = null;
+    let shownAt = 0;
+
+    function setStatus(text, tone = "muted") {
+      const tones = { muted: "text-slate-600", ok: "text-emerald-700", bad: "text-rose-700" };
+      $("status").className = `text-sm ${tones[tone]}`;
+      $("status").textContent = text;
+    }
+
+    if (configMissing) {
+      setStatus("Chưa điền cấu hình Firebase trong js/firebase-config.js.", "bad");
+      throw new Error("Firebase config missing");
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        try { await signInAnonymously(auth); }
+        catch (e) { setStatus(`Không đăng nhập được (${e.code}).`, "bad"); }
+        return;
+      }
+      $("who").textContent = `Mã ẩn danh của máy này: ${user.uid.slice(0, 6)}…`;
+      setStatus("Đã kết nối.", "ok");
+      $("joinBox").classList.remove("hidden");
+      const fromUrl = normalizeRoomCode(new URLSearchParams(location.search).get("room"));
+      if (ROOM_RE.test(fromUrl)) { $("roomInput").value = fromUrl; joinRoom(fromUrl); }
+    });
+
+    $("joinBtn").addEventListener("click", () => joinRoom(normalizeRoomCode($("roomInput").value)));
+
+    async function joinRoom(code) {
+      if (!ROOM_RE.test(code)) { setStatus("Mã phòng gồm 6 ký tự.", "bad"); return; }
+      $("joinBtn").disabled = true;
+      try {
+        const snap = await getDoc(doc(db, "sessions", code));
+        if (!snap.exists()) { setStatus("Không tìm thấy phòng này.", "bad"); return; }
+        roomCode = code;
+        $("roomLabel").textContent = code;
+        $("joinBox").classList.add("hidden");
+        $("roomBox").classList.remove("hidden");
+        setStatus("Đã vào phòng.", "ok");
+        renderChoices();
+      } catch (e) {
+        setStatus(`Không vào được phòng (${e.code || e.message}).`, "bad");
+      } finally {
+        $("joinBtn").disabled = false;
+      }
+    }
+
+    function renderChoices() {
+      const box = $("choices");
+      box.innerHTML = "";
+      for (let n = 1; n <= 5; n++) {
+        const b = document.createElement("button");
+        b.textContent = n;
+        b.className = "rounded-lg border border-slate-300 py-3 text-lg font-medium active:bg-slate-200";
+        b.addEventListener("click", () => sendAnswer(n));
+        box.appendChild(b);
+      }
+      shownAt = performance.now();
+    }
+
+    async function sendAnswer(choice) {
+      const uid = auth.currentUser.uid;
+      $("sendMsg").className = "text-sm text-slate-600";
+      $("sendMsg").textContent = "Đang gửi…";
+      try {
+        await setDoc(doc(db, "sessions", roomCode, "responses", responseId(uid, TEST_EXP)), {
+          uid,
+          exp: TEST_EXP,
+          answers: { choice },
+          times: { choice: Math.round(performance.now() - shownAt) },
+          updatedAt: serverTimestamp()
+        });
+        $("sendMsg").className = "text-sm text-emerald-700";
+        $("sendMsg").textContent = `Đã ghi câu trả lời: ${choice}.`;
+      } catch (e) {
+        $("sendMsg").className = "text-sm text-rose-700";
+        $("sendMsg").textContent = e.code === "permission-denied"
+          ? "Phòng chưa mở phiên thu hoặc đã khóa."
+          : `Gửi lỗi (${e.code || e.message}).`;
+      }
+    }
+  </script>
+</body>
+</html>

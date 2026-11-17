@@ -1,0 +1,84 @@
+rules_version = '2';
+
+// Security rules for the classroom experiment app.
+// Data model (plan, section "Dữ liệu, ẩn danh và so sánh giữa các lớp"):
+//   sessions/{code}                         session state; instructor writes, any signed-in user may get one doc
+//   sessions/{code}/responses/{uid_expId}   one person's answers to one experiment; owner writes while open, instructor reads
+//   sessions/{code}/assignments/{expId}     conditions (engine B), pairs and roles (engine D); instructor writes
+//   sessions/{code}/results/{expId}         aggregates and pair scores; instructor writes
+//   archive/{sessionId}                     anonymized copy for cross-class comparison; instructor only
+// Everything not matched below is denied.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // The instructor is one Google account, identified by UID.
+    // Replace the placeholder with the UID shown on control.html after the first Google sign-in.
+    function isInstructor() {
+      return signedIn()
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.auth.uid in ['REPLACE_WITH_INSTRUCTOR_UID'];
+    }
+
+    function sessionData(code) {
+      return get(/databases/$(database)/documents/sessions/$(code)).data;
+    }
+
+    // Accept a response only while the room is not locked and either
+    // the opening batch is open and lists this experiment, or this experiment's game phase is "open".
+    function accepting(code, expId) {
+      let s = sessionData(code);
+      let game = s.get('game', null);
+      return s.get('locked', true) == false
+        && ((s.get('collectOpen', false) == true && expId in s.get('collect', []))
+            || (game != null && game.get('exp', '') == expId && game.get('phase', '') == 'open'));
+    }
+
+    // Locked response shape: fixed keys, own uid, server timestamp, bounded maps.
+    function validResponse(d) {
+      return d.keys().hasAll(['uid', 'exp', 'answers', 'updatedAt'])
+        && d.keys().hasOnly(['uid', 'exp', 'answers', 'times', 'updatedAt'])
+        && d.uid == request.auth.uid
+        && d.exp is string
+        && d.exp.matches('^[A-Z][0-9]{2}$')
+        && d.answers is map
+        && d.answers.size() <= 100
+        && (!('times' in d) || (d.times is map && d.times.size() <= 100))
+        && d.updatedAt == request.time;
+    }
+
+    match /sessions/{code} {
+      allow get: if signedIn();
+      allow list: if isInstructor();
+      allow create: if isInstructor()
+        && code.matches('^[A-HJ-NP-Z2-9]{6}$')
+        && request.resource.data.owner == request.auth.uid;
+      allow update, delete: if isInstructor();
+
+      match /responses/{rid} {
+        allow read, delete: if isInstructor();
+        allow create, update: if signedIn()
+          && rid == request.auth.uid + '_' + request.resource.data.exp
+          && validResponse(request.resource.data)
+          && accepting(code, request.resource.data.exp);
+      }
+
+      match /assignments/{expId} {
+        allow read: if signedIn();
+        allow write: if isInstructor();
+      }
+
+      match /results/{expId} {
+        allow read: if signedIn();
+        allow write: if isInstructor();
+      }
+    }
+
+    match /archive/{sessionId} {
+      allow read, write: if isInstructor();
+    }
+  }
+}
