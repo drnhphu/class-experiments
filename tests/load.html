@@ -19,13 +19,14 @@
     <h1 class="text-xl font-semibold">Thử tải: máy giả lập, đổi trạng thái và ghi đồng loạt</h1>
     <div class="flex items-center gap-2">
       <label class="text-sm">Số máy <input id="n" type="number" value="60" min="1" max="80" class="w-20 rounded border border-slate-300 px-2 py-1"></label>
+      <label class="flex items-center gap-1 text-sm"><input id="lite" type="checkbox" checked> Máy giả lập ghi bằng yêu cầu rời (Firestore Lite)</label>
       <button id="signIn" class="hidden rounded-lg border border-slate-300 bg-white px-4 py-2">Đăng nhập Google (giảng viên)</button>
       <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40" disabled>Chạy thử tải</button>
     </div>
     <p id="log" class="whitespace-pre-line text-xs text-slate-600"></p>
     <div id="verdict" class="hidden rounded-xl p-4 font-semibold"></div>
     <table class="w-full text-sm">
-      <thead class="text-left text-slate-500"><tr><th>#</th><th>Đổi trạng thái</th><th>Máy nhận</th><th>Trung vị (ms)</th><th>Chậm nhất (ms)</th><th></th></tr></thead>
+      <thead class="text-left text-slate-500"><tr><th>#</th><th>Đổi trạng thái</th><th>Máy chủ xác nhận (ms)</th><th>Máy nhận</th><th>Trung vị (ms)</th><th>Chậm nhất (ms)</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div id="writes" class="text-sm"></div>
@@ -38,6 +39,10 @@
       onSnapshot, serverTimestamp, writeBatch, getDocs
     } from "../js/firebase.js";
     import { newRoomCode, responseId } from "../js/room.js";
+    // Firestore Lite sends each write as one plain request. With 60 full clients in ONE browser, every client
+    // keeps its write channel open for about a minute after writing, which starves the browser's connection
+    // pool and delays the instructor (a test-harness artifact: real phones each have their own connections).
+    import * as lite from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore-lite.js";
 
     const $ = (id) => document.getElementById(id);
     const LIMIT_MS = 2000;
@@ -56,7 +61,7 @@
       const a = getAuth(app);
       await a.authStateReady();
       if (!a.currentUser) await signInAnonymously(a);
-      return { i, uid: a.currentUser.uid, db: getFirestore(app), seen: {}, unsub: null };
+      return { i, uid: a.currentUser.uid, db: getFirestore(app), ldb: lite.getFirestore(app), seen: {}, unsub: null };
     }
 
     $("run").onclick = async () => {
@@ -94,9 +99,16 @@
         })));
         log("Mọi máy đã nghe trạng thái phòng.");
 
-        const write = (p, exp, answers) => setDoc(doc(p.db, "sessions", code, "responses", responseId(p.uid, exp)),
-          { uid: p.uid, exp, answers, times: Object.fromEntries(Object.keys(answers).map((k) => [k, 1000])), updatedAt: serverTimestamp() }, { merge: true })
-          .then(() => { writeOk++; }, (e) => { writeFail++; console.error(e); });
+        const useLite = $("lite").checked;
+        log(useLite ? "Máy giả lập ghi bằng yêu cầu rời (Firestore Lite)." : "Máy giả lập ghi bằng thư viện đầy đủ.");
+        const write = (p, exp, answers) => {
+          const payload = (ts) => ({ uid: p.uid, exp, answers, times: Object.fromEntries(Object.keys(answers).map((k) => [k, 1000])), updatedAt: ts });
+          const id = responseId(p.uid, exp);
+          const w = useLite
+            ? lite.setDoc(lite.doc(p.ldb, "sessions", code, "responses", id), payload(lite.serverTimestamp()), { merge: true })
+            : setDoc(doc(p.db, "sessions", code, "responses", id), payload(serverTimestamp()), { merge: true });
+          return w.then(() => { writeOk++; }, (e) => { writeFail++; console.error(e); });
+        };
         const burst = async (label, fn) => {
           const ts = performance.now();
           await Promise.all(phones.map(fn));
@@ -109,6 +121,7 @@
           seq++;
           sent[seq] = performance.now();
           await updateDoc(sref, { ...fields, seq });
+          const ack = performance.now() - sent[seq];
           const deadline = performance.now() + 8000;
           while (phones.some((p) => !(seq in p.seen)) && performance.now() < deadline) await wait(50);
           const lat = phones.filter((p) => seq in p.seen).map((p) => p.seen[seq] - sent[seq]).sort((a, b) => a - b);
@@ -117,9 +130,9 @@
           pass &&= ok;
           const tr = document.createElement("tr");
           tr.className = "border-t border-slate-200";
-          [seq, label, `${got}/${N}`, Math.round(med), Math.round(max), ok ? "✓" : "✗"].forEach((v, k) => {
+          [seq, label, Math.round(ack), `${got}/${N}`, Math.round(med), Math.round(max), ok ? "✓" : "✗"].forEach((v, k) => {
             const td = document.createElement("td"); td.textContent = String(v);
-            td.className = "py-1 pr-2" + (k === 5 ? (ok ? " text-emerald-700" : " font-bold text-rose-700") : "");
+            td.className = "py-1 pr-2" + (k === 6 ? (ok ? " text-emerald-700" : " font-bold text-rose-700") : "");
             tr.append(td);
           });
           $("rows").append(tr);
@@ -161,7 +174,7 @@
         const v = $("verdict");
         v.classList.remove("hidden");
         v.className = `rounded-xl p-4 font-semibold ${pass ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`;
-        v.textContent = `Điều kiện qua cửa Giai đoạn 1 (${N} máy): ${pass ? "ĐẠT" : "CHƯA ĐẠT"}.`;
+        v.textContent = `Điều kiện qua cửa Giai đoạn 1 (${N} máy, ghi ${useLite ? "bằng yêu cầu rời" : "bằng thư viện đầy đủ"}): ${pass ? "ĐẠT" : "CHƯA ĐẠT"}.`;
       } catch (e) {
         log(`Lỗi khi chạy: ${e.code || e.message}`);
       } finally {

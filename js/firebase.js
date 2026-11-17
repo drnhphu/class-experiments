@@ -21,10 +21,15 @@ export const configMissing = firebaseConfig.apiKey === "REPLACE_ME";
 export { firebaseConfig };
 
 // Default app instance used by join.html and control.html.
-// Offline cache (plan, risk table): writes made without network are queued and sent on reconnect.
+// Offline cache (plan, risk table) only on the student page: writes made without network are queued and
+// sent on reconnect. The instructor pages use the memory cache on purpose: with a shared multi-tab cache,
+// one hidden tab holds the network lease and can delay the instructor's state changes by tens of seconds
+// (seen in the Phase 1 load test).
+const isStudentPage = /\/join\.html$/.test(location.pathname);
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = (() => {
+  if (!isStudentPage) return getFirestore(app);
   try {
     return initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
   } catch {
