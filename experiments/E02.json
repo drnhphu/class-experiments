@@ -1,0 +1,146 @@
+{
+  "id": "E02",
+  "engine": "A",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Nghịch lý Allais: tiên đề độc lập, hiệu ứng chắc chắn",
+    "en": "Allais paradox: independence axiom, certainty effect"
+  },
+  "design": "pair",
+  "rule": "allais",
+  "unit": {
+    "vi": "triệu đồng",
+    "en": "million VND"
+  },
+  "separate": {
+    "steps": [
+      "p1",
+      "p2"
+    ],
+    "minGap": 3
+  },
+  "text": {
+    "sure": {
+      "vi": "Chắc chắn nhận {x} {unit}",
+      "en": "{x} {unit} for sure"
+    },
+    "outcome": {
+      "vi": "{p}% nhận {x} {unit}",
+      "en": "{p}% chance of {x} {unit}"
+    },
+    "zero": {
+      "vi": "{p}% không nhận gì",
+      "en": "{p}% chance of nothing"
+    }
+  },
+  "steps": [
+    {
+      "id": "p1",
+      "type": "choice",
+      "prompt": {
+        "vi": "Bạn được chọn một trong hai phương án thưởng dưới đây. Bạn chọn phương án nào?",
+        "en": "You may pick one of the two prize options below. Which do you choose?"
+      },
+      "options": [
+        {
+          "name": {
+            "vi": "Phương án A",
+            "en": "Option A"
+          },
+          "outcomes": [
+            {
+              "p": 100,
+              "x": 480
+            }
+          ]
+        },
+        {
+          "name": {
+            "vi": "Phương án B",
+            "en": "Option B"
+          },
+          "outcomes": [
+            {
+              "p": 33,
+              "x": 500
+            },
+            {
+              "p": 66,
+              "x": 480
+            },
+            {
+              "p": 1,
+              "x": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "choice",
+      "prompt": {
+        "vi": "Bạn được chọn một trong hai phương án thưởng dưới đây. Bạn chọn phương án nào?",
+        "en": "You may pick one of the two prize options below. Which do you choose?"
+      },
+      "options": [
+        {
+          "name": {
+            "vi": "Phương án C",
+            "en": "Option C"
+          },
+          "outcomes": [
+            {
+              "p": 34,
+              "x": 480
+            },
+            {
+              "p": 66,
+              "x": 0
+            }
+          ]
+        },
+        {
+          "name": {
+            "vi": "Phương án D",
+            "en": "Option D"
+          },
+          "outcomes": [
+            {
+              "p": 33,
+              "x": 500
+            },
+            {
+              "p": 67,
+              "x": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Kahneman và Tversky (1979), bài 1 và bài 2, N = 72",
+      "en": "Kahneman and Tversky (1979), problems 1 and 2, N = 72"
+    },
+    "note": {
+      "vi": "Bài gốc dùng 2.400 và 2.500 đơn vị tiền Israel với cùng bộ xác suất; 61% người tham gia chọn phương án phổ biến ở cả hai bài",
+      "en": "The original used 2,400 and 2,500 Israeli pounds with the same probabilities; 61% of subjects made the modal choice in both problems"
+    },
+    "percents": {
+      "p1": [
+        82,
+        18
+      ],
+      "p2": [
+        17,
+        83
+      ]
+    },
+    "cross": {
+      "01": 61
+    }
+  }
+}

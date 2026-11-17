@@ -69,6 +69,7 @@
       S.store.update((st) => {
         st.answers = st.answers || {};
         st.answers[exp] = { ...(st.answers[exp] || {}), ...answers };
+        if (times) { st.times = st.times || {}; st.times[exp] = { ...(st.times[exp] || {}), ...times }; }
         return st;
       });
     }
@@ -188,7 +189,8 @@
     }
 
     function makeCtx(exp, extra = {}) {
-      return { lang: S.lang, t: S.t, uid: S.uid, code: S.code, exp, myAnswers: S.store.get().answers?.[exp] || {}, ...extra };
+      const st = S.store.get();
+      return { lang: S.lang, t: S.t, uid: S.uid, code: S.code, exp, myAnswers: st.answers?.[exp] || {}, myTimes: st.times?.[exp] || {}, ...extra };
     }
 
     async function assignmentFor(exp, fresh = false) {

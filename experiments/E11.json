@@ -1,0 +1,136 @@
+{
+  "id": "E11",
+  "engine": "C",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Bỏ qua tỷ lệ nền: quy tắc Bayes, thuật giải đại diện",
+    "en": "Base-rate neglect: Bayes' rule, representativeness heuristic"
+  },
+  "design": "bayes",
+  "steps": [
+    {
+      "id": "r1",
+      "format": "percent",
+      "base": 2,
+      "sens": 90,
+      "fpr": 8,
+      "prompt": {
+        "vi": "Một ngân hàng dùng hệ thống tự động cảnh báo giao dịch gian lận. Biết rằng 2% giao dịch là gian lận. Nếu giao dịch là gian lận, hệ thống cảnh báo với xác suất 90%. Nếu giao dịch hợp lệ, hệ thống vẫn cảnh báo nhầm với xác suất 8%. Một giao dịch vừa bị cảnh báo. Xác suất giao dịch này thật sự là gian lận là bao nhiêu?",
+        "en": "A bank uses an automatic system to flag fraudulent transactions. 2% of transactions are fraudulent. If a transaction is fraudulent, the system flags it with probability 90%. If a transaction is legitimate, the system still flags it by mistake with probability 8%. A transaction has just been flagged. What is the probability that it is actually fraudulent?"
+      },
+      "options": [
+        {
+          "text": {
+            "vi": "Khoảng 2%",
+            "en": "About 2%"
+          },
+          "value": 2
+        },
+        {
+          "text": {
+            "vi": "Khoảng 19%",
+            "en": "About 19%"
+          },
+          "value": 19
+        },
+        {
+          "text": {
+            "vi": "Khoảng 50%",
+            "en": "About 50%"
+          },
+          "value": 50
+        },
+        {
+          "text": {
+            "vi": "Khoảng 90%",
+            "en": "About 90%"
+          },
+          "value": 90
+        }
+      ],
+      "answer": 1,
+      "explain": {
+        "vi": "Hình dung 1.000 giao dịch: 20 giao dịch gian lận, hệ thống cảnh báo 18 trong số đó. 980 giao dịch hợp lệ, hệ thống cảnh báo nhầm khoảng 78. Trong khoảng 96 giao dịch bị cảnh báo, chỉ 18 là gian lận: 18 / 96 ≈ 19%.",
+        "en": "Picture 1,000 transactions: 20 are fraudulent and the system flags 18 of them. 980 are legitimate and the system wrongly flags about 78. Of the roughly 96 flagged transactions, only 18 are fraudulent: 18 / 96 ≈ 19%."
+      }
+    },
+    {
+      "id": "r2",
+      "format": "frequency",
+      "base": 1,
+      "sens": 80,
+      "fpr": 10,
+      "population": 1000,
+      "prompt": {
+        "vi": "Một công ty dùng một bài kiểm tra để phát hiện hồ sơ xin việc dùng bằng cấp giả. Cứ 1.000 hồ sơ thì có 10 hồ sơ dùng bằng giả. Trong 10 hồ sơ đó, bài kiểm tra phát hiện 8 hồ sơ. Trong 990 hồ sơ dùng bằng thật, bài kiểm tra vẫn báo nhầm 99 hồ sơ. Hãy hình dung 100 hồ sơ bị bài kiểm tra báo là bằng giả. Khoảng bao nhiêu hồ sơ trong số đó thật sự dùng bằng giả?",
+        "en": "A company uses a test to detect job applications with fake degrees. Out of every 1,000 applications, 10 use a fake degree. Of those 10, the test catches 8. Of the 990 applications with real degrees, the test still wrongly flags 99. Picture 100 applications that the test flags as fake. About how many of them actually use a fake degree?"
+      },
+      "options": [
+        {
+          "text": {
+            "vi": "Khoảng 1 hồ sơ",
+            "en": "About 1"
+          },
+          "value": 1
+        },
+        {
+          "text": {
+            "vi": "Khoảng 7 hồ sơ",
+            "en": "About 7"
+          },
+          "value": 7
+        },
+        {
+          "text": {
+            "vi": "Khoảng 50 hồ sơ",
+            "en": "About 50"
+          },
+          "value": 50
+        },
+        {
+          "text": {
+            "vi": "Khoảng 80 hồ sơ",
+            "en": "About 80"
+          },
+          "value": 80
+        }
+      ],
+      "answer": 1,
+      "explain": {
+        "vi": "Trong 1.000 hồ sơ có 8 + 99 = 107 hồ sơ bị báo, trong đó chỉ 8 dùng bằng giả: 8 / 107 ≈ 7,5%, tức khoảng 7 trong 100 hồ sơ bị báo.",
+        "en": "Of 1,000 applications, 8 + 99 = 107 are flagged and only 8 of them use a fake degree: 8 / 107 ≈ 7.5%, or about 7 in every 100 flagged."
+      }
+    }
+  ],
+  "icons": {
+    "tp": {
+      "vi": "gian lận, bị cảnh báo",
+      "en": "fraud, flagged"
+    },
+    "fn": {
+      "vi": "gian lận, không bị cảnh báo",
+      "en": "fraud, not flagged"
+    },
+    "fp": {
+      "vi": "hợp lệ, bị cảnh báo nhầm",
+      "en": "legitimate, wrongly flagged"
+    },
+    "tn": {
+      "vi": "hợp lệ, không bị cảnh báo",
+      "en": "legitimate, not flagged"
+    }
+  },
+  "benchmark": {
+    "label": {
+      "vi": "Gigerenzer và Hoffrage (1995)",
+      "en": "Gigerenzer and Hoffrage (1995)"
+    },
+    "note": {
+      "vi": "Tỷ lệ giải theo quy tắc Bayes: 16% với dạng xác suất, 46% với dạng tần suất tự nhiên; các bài gốc khác bài ở đây",
+      "en": "Bayesian answers: 16% in the probability format, 46% in the natural frequency format; the original problems differ from these"
+    },
+    "r1": 16,
+    "r2": 46
+  }
+}

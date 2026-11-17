@@ -1,0 +1,41 @@
+{
+  "id": "E10",
+  "engine": "C",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Né tránh thua lỗ: hệ số né tránh thua lỗ, lý thuyết triển vọng",
+    "en": "Loss aversion: loss aversion coefficient, prospect theory"
+  },
+  "design": "lossaversion",
+  "unit": {
+    "vi": "nghìn đồng",
+    "en": "thousand VND"
+  },
+  "gamble": {
+    "p": 50,
+    "loss": 100
+  },
+  "steps": [
+    {
+      "id": "gain",
+      "prompt": {
+        "vi": "Tung một đồng xu. Mặt sấp: bạn mất {loss} {unit}. Mặt ngửa: bạn được một khoản tiền thắng. Khoản thắng nhỏ nhất là bao nhiêu {unit} để bạn chấp nhận chơi?",
+        "en": "A coin is flipped. Tails: you lose {loss} {unit}. Heads: you win some amount. What is the smallest win, in {unit}, that would make you accept this bet?"
+      },
+      "min": 1,
+      "max": 2000
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Tversky và Kahneman (1992)",
+      "en": "Tversky and Kahneman (1992)"
+    },
+    "note": {
+      "vi": "Hệ số trung vị 2,25 ước lượng từ 25 nghiên cứu sinh bằng cách đo khác câu hỏi ở đây",
+      "en": "Median coefficient of 2.25 estimated from 25 graduate students with a different elicitation from this one"
+    },
+    "lambda": 2.25
+  }
+}

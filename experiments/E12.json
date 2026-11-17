@@ -1,0 +1,78 @@
+{
+  "id": "E12",
+  "engine": "C",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Câu đố phản tư nhận thức: hai hệ thống tư duy",
+    "en": "Cognitive reflection: two systems of thinking"
+  },
+  "design": "crt",
+  "timeLimit": 60,
+  "steps": [
+    {
+      "id": "q1",
+      "kind": "sumdiff",
+      "total": 110,
+      "diff": 100,
+      "answer": 5,
+      "intuitive": 10,
+      "prompt": {
+        "vi": "Một cây bút và một cuốn sổ giá tổng cộng 110 nghìn đồng. Cuốn sổ đắt hơn cây bút 100 nghìn đồng. Cây bút giá bao nhiêu nghìn đồng?",
+        "en": "A pen and a notebook cost 110 thousand VND in total. The notebook costs 100 thousand VND more than the pen. How much does the pen cost, in thousand VND?"
+      },
+      "unit": {
+        "vi": "nghìn đồng",
+        "en": "thousand VND"
+      }
+    },
+    {
+      "id": "q2",
+      "kind": "rate",
+      "k": 3,
+      "n": 90,
+      "answer": 3,
+      "intuitive": 90,
+      "prompt": {
+        "vi": "Nếu 3 máy in cần 3 phút để in 3 tờ rơi, thì 90 máy in cần bao nhiêu phút để in 90 tờ rơi?",
+        "en": "If 3 printers take 3 minutes to print 3 flyers, how many minutes would 90 printers take to print 90 flyers?"
+      },
+      "unit": {
+        "vi": "phút",
+        "en": "minutes"
+      }
+    },
+    {
+      "id": "q3",
+      "kind": "doubling",
+      "days": 30,
+      "answer": 29,
+      "intuitive": 15,
+      "prompt": {
+        "vi": "Một tin đồn lan trong trường: mỗi ngày số người biết tăng gấp đôi. Sau 30 ngày thì cả trường đều biết. Sau bao nhiêu ngày thì một nửa trường biết?",
+        "en": "A rumour spreads through a school: every day the number of people who know it doubles. After 30 days the whole school knows. After how many days did half the school know?"
+      },
+      "unit": {
+        "vi": "ngày",
+        "en": "days"
+      }
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Frederick (2005), N = 3.428",
+      "en": "Frederick (2005), N = 3,428"
+    },
+    "note": {
+      "vi": "Bài gốc là ba câu đố khác, không giới hạn thời gian; ở đây là biến thể cùng cấu trúc",
+      "en": "The original used three different puzzles without a time limit; these are variants with the same structure"
+    },
+    "mean": 1.24,
+    "scores": [
+      33,
+      28,
+      23,
+      17
+    ]
+  }
+}

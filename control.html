@@ -33,7 +33,7 @@
     import { loadLang, makeT, pick, el } from "./js/i18n.js";
     import { loadCatalog, validateEntry, loadQuiz, quizErrors, loadConfig, loadEngine } from "./js/catalog.js";
     import { newRoomCode } from "./js/room.js";
-    import { buildOrder, presentView, poolKey, orderSignature, buildCsv, buildArchive, downloadText, QUIZ_ID } from "./js/session.js";
+    import { buildOrder, defaultItems, separationErrors, parseStepKey, presentView, poolKey, orderSignature, buildCsv, buildArchive, downloadText, QUIZ_ID } from "./js/session.js";
 
     const $ = (id) => document.getElementById(id);
     const t = makeT(await loadLang("vi")); // the control page is for the instructor: Vietnamese UI
@@ -164,49 +164,70 @@
       renderLang();
 
       const list = el("div", { class: "space-y-2" });
+      const orderBox = el("div", { class: "space-y-1" });
+      // Order items of the opening batch ("EXP" or "EXP#step" for split experiments such as E02).
+      // Rebuilt from the catalog default order whenever the selection changes.
+      const pickedCollect = () => F.picked.map((id) => C.checks.get(id)).filter((c) => c && c.engine.mode === "collect").map((c) => c.config);
+      const resetOrder = () => { F.order = defaultItems(pickedCollect(), C.catalog.defaultOrder); };
+      const renderOrder = () => {
+        const items = F.order || [];
+        orderBox.replaceChildren(...(items.length ? [
+          el("div", { class: "text-sm font-medium" }, t("setup.orderTitle")),
+          el("p", { class: "text-xs text-slate-500" }, t("setup.orderHelp2")),
+          ...items.map((it, pos) => {
+            const { exp, step } = parseStepKey(it);
+            return el("div", { class: "flex items-center justify-between rounded border border-slate-200 px-2 py-1 text-sm" },
+              el("span", {}, el("span", { class: "mr-2 text-xs text-slate-500" }, `#${pos + 1}`), el("span", { class: "font-mono" }, exp),
+                step ? el("span", { class: "ml-2 text-slate-500" }, t("setup.part", { s: step })) : null),
+              el("div", { class: "flex gap-1" },
+                btn("↑", () => { if (pos > 0) { [items[pos - 1], items[pos]] = [items[pos], items[pos - 1]]; renderOrder(); } }),
+                btn("↓", () => { if (pos < items.length - 1) { [items[pos + 1], items[pos]] = [items[pos], items[pos + 1]]; renderOrder(); } })));
+          })] : []));
+      };
       const renderList = () => {
         const rows = C.catalog.experiments.map((e) => {
           const chk = C.checks.get(e.id);
           const ok = chk && !chk.errors.length;
-          const pos = F.picked.indexOf(e.id);
+          const on = F.picked.includes(e.id);
           const kind = ok ? (chk.engine.mode === "live" ? t("setup.kindLive") : t("setup.kindCollect")) : "";
           return el("div", { class: `rounded-lg border p-2 ${ok ? "border-slate-200" : "border-rose-300 bg-rose-50"}` },
-            el("div", { class: "flex items-center justify-between gap-2" },
-              el("label", { class: "flex items-center gap-2" },
-                el("input", { type: "checkbox", disabled: !ok, checked: pos >= 0, onchange: (ev) => {
-                  if (ev.target.checked) F.picked.push(e.id); else F.picked.splice(F.picked.indexOf(e.id), 1);
-                  renderList();
-                } }),
-                el("span", { class: "font-mono" }, e.id),
-                el("span", {}, ok ? `${pick(chk.config.concept, "vi")} · ${kind} · v${chk.config.version}` : t("setup.blocked"))),
-              pos >= 0 ? el("div", { class: "flex items-center gap-1" },
-                el("span", { class: "text-xs text-slate-500" }, `#${pos + 1}`),
-                btn("↑", () => { if (pos > 0) { [F.picked[pos - 1], F.picked[pos]] = [F.picked[pos], F.picked[pos - 1]]; renderList(); } }),
-                btn("↓", () => { if (pos < F.picked.length - 1) { [F.picked[pos + 1], F.picked[pos]] = [F.picked[pos], F.picked[pos + 1]]; renderList(); } })) : null),
+            el("label", { class: "flex items-center gap-2" },
+              el("input", { type: "checkbox", disabled: !ok, checked: on, onchange: (ev) => {
+                if (ev.target.checked) F.picked.push(e.id); else F.picked.splice(F.picked.indexOf(e.id), 1);
+                resetOrder(); renderList(); renderOrder();
+              } }),
+              el("span", { class: "font-mono" }, e.id),
+              el("span", {}, ok ? `${pick(chk.config.concept, "vi")} · ${kind} · v${chk.config.version}` : t("setup.blocked"))),
             ok ? null : el("ul", { class: "mt-1 list-disc pl-6 text-sm text-rose-700" }, chk.errors.map((x) => el("li", {}, x))));
         });
         list.replaceChildren(...(rows.length ? rows : [el("p", { class: "text-sm text-slate-500" }, t("setup.emptyCatalog"))]));
       };
+      resetOrder();
       renderList();
+      renderOrder();
 
       const create = btn(t("setup.create"), () => guard(async () => {
         if (!F.picked.length) throw new Error(t("setup.pickOne"));
         const cfgs = F.picked.map((id) => C.checks.get(id));
         const collectCfgs = cfgs.filter((c) => c.engine.mode === "collect").map((c) => c.config);
         const games = cfgs.filter((c) => c.engine.mode === "live").map((c) => c.id);
+        const order = buildOrder(collectCfgs, F.order);
+        const sepErrs = separationErrors(collectCfgs, order);
+        if (sepErrs.length) throw new Error(sepErrs.join(" "));
+        const collect = [...new Set(order.map((k) => parseStepKey(k).exp))];
         const quizId = quizSel.value;
         let code;
         for (let i = 0; i < 5; i++) { code = newRoomCode(); if (!(await getDoc(doc(db, "sessions", code))).exists()) break; }
         await setDoc(doc(db, "sessions", code), {
           owner: C.user.uid, createdAt: serverTimestamp(), appVersion: APP_VERSION, catalog: catalogName, lang: F.lang,
           info: { program: programSel.value, label: labelIn.value.trim(), date: dateIn.value || today() },
-          collect: collectCfgs.map((c) => c.id), order: buildOrder(collectCfgs), games,
+          collect, order, games,
           versions: Object.fromEntries(cfgs.map((c) => [c.id, c.config.version])),
           consent: consentIn.checked,
           quiz: quizId ? { id: quizId, version: C.quizChecks.get(quizId).quiz.version, open: false, reveal: false } : null,
           joinOpen: true, collectOpen: false, reveal: null, game: null, locked: false
         });
-        F.picked = [];
+        F.picked = []; F.order = [];
         attach(code);
       }), primary);
 
@@ -219,7 +240,7 @@
           el("label", { class: "flex items-center gap-2" }, consentIn, t("setup.consent")),
           el("label", { class: "space-y-1" }, el("div", {}, t("setup.quiz")), quizSel)),
         el("div", { class: "space-y-1" }, el("div", { class: "text-sm font-medium" }, t("setup.experiments")),
-          el("p", { class: "text-xs text-slate-500" }, t("setup.orderHelp")), list),
+          el("p", { class: "text-xs text-slate-500" }, t("setup.orderHelp")), list, orderBox),
         create]);
     }
 

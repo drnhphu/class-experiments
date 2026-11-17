@@ -1,0 +1,210 @@
+{
+  "id": "E09",
+  "engine": "C",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Tự tin thái quá về độ chính xác",
+    "en": "Overconfidence in precision"
+  },
+  "design": "calibration",
+  "confidence": 90,
+  "steps": [
+    {
+      "id": "a",
+      "prompt": {
+        "vi": "Với mỗi câu hỏi, hãy nhập một khoảng (cận dưới và cận trên) mà bạn tin chắc {c}% là chứa đáp án đúng. Không tra cứu. Khoảng rộng hay hẹp là do bạn quyết định.",
+        "en": "For each question, enter a range (lower and upper bound) that you are {c}% sure contains the true answer. Do not look anything up. How wide or narrow the range is, is up to you."
+      },
+      "questions": [
+        {
+          "id": "q01",
+          "prompt": {
+            "vi": "Tòa nhà Landmark 81 (TP.HCM) cao bao nhiêu mét?",
+            "en": "How tall is the Landmark 81 tower in Ho Chi Minh City, in metres?"
+          },
+          "unit": {
+            "vi": "mét",
+            "en": "metres"
+          },
+          "answer": 461.2,
+          "source": {
+            "label": "CTBUH Skyscraper Center",
+            "url": "https://www.skyscrapercenter.com/building/landmark-81/18192"
+          }
+        },
+        {
+          "id": "q02",
+          "prompt": {
+            "vi": "Adam Smith xuất bản cuốn The Wealth of Nations (Của cải của các dân tộc) vào năm nào?",
+            "en": "In what year did Adam Smith publish The Wealth of Nations?"
+          },
+          "unit": {
+            "vi": "năm",
+            "en": "year"
+          },
+          "answer": 1776,
+          "year": true,
+          "source": {
+            "label": "Rae (1895), Life of Adam Smith, Online Library of Liberty",
+            "url": "https://oll.libertyfund.org/page/rae-on-the-publication-of-the-wealth-of-nations-1776"
+          }
+        },
+        {
+          "id": "q03",
+          "prompt": {
+            "vi": "Theo Tổng điều tra dân số và nhà ở năm 2019, dân số Việt Nam lúc 0 giờ ngày 1/4/2019 là bao nhiêu người?",
+            "en": "According to the 2019 Population and Housing Census, what was Viet Nam's population at 0:00 on 1 April 2019?"
+          },
+          "unit": {
+            "vi": "người",
+            "en": "people"
+          },
+          "answer": 96208984,
+          "source": {
+            "label": "Tổng cục Thống kê (2019), thông cáo báo chí kết quả Tổng điều tra",
+            "url": "https://www.nso.gov.vn/du-lieu-va-so-lieu-thong-ke/2019/12/thong-cao-bao-chi-ket-qua-tong-dieu-tra-dan-so-va-nha-o-nam-2019/"
+          }
+        },
+        {
+          "id": "q04",
+          "prompt": {
+            "vi": "Khoảng cách trung bình từ Trái Đất đến Mặt Trăng là bao nhiêu km?",
+            "en": "What is the average distance from the Earth to the Moon, in kilometres?"
+          },
+          "unit": {
+            "vi": "km",
+            "en": "km"
+          },
+          "answer": 384400,
+          "source": {
+            "label": "NASA Science, Moon Facts",
+            "url": "https://science.nasa.gov/moon/facts/"
+          }
+        },
+        {
+          "id": "q05",
+          "prompt": {
+            "vi": "Cầu Long Biên (Hà Nội) được khánh thành vào năm nào?",
+            "en": "In what year was Long Bien Bridge in Hanoi inaugurated?"
+          },
+          "unit": {
+            "vi": "năm",
+            "en": "year"
+          },
+          "answer": 1902,
+          "year": true,
+          "source": {
+            "label": "Báo Đại Đoàn Kết",
+            "url": "https://daidoanket.vn/anh-can-canh-su-xuong-cap-cua-cau-long-bien-10185455.html"
+          }
+        }
+      ]
+    },
+    {
+      "id": "b",
+      "prompt": {
+        "vi": "Tiếp tục: nhập khoảng mà bạn tin chắc {c}% là chứa đáp án đúng cho mỗi câu.",
+        "en": "Continue: enter a range you are {c}% sure contains the true answer for each question."
+      },
+      "questions": [
+        {
+          "id": "q06",
+          "prompt": {
+            "vi": "Liên Hợp Quốc hiện có bao nhiêu quốc gia thành viên?",
+            "en": "How many member states does the United Nations currently have?"
+          },
+          "unit": {
+            "vi": "quốc gia",
+            "en": "states"
+          },
+          "answer": 193,
+          "source": {
+            "label": "UN Dag Hammarskjöld Library, UN Membership",
+            "url": "https://research.un.org/en/unmembers/intro"
+          }
+        },
+        {
+          "id": "q07",
+          "prompt": {
+            "vi": "Đỉnh Everest cao bao nhiêu mét so với mực nước biển, theo số đo chính thức hiện nay?",
+            "en": "How high is Mount Everest above sea level, in metres, according to the current official measurement?"
+          },
+          "unit": {
+            "vi": "mét",
+            "en": "metres"
+          },
+          "answer": 8848.86,
+          "source": {
+            "label": "Al Jazeera (8/12/2020), Trung Quốc và Nepal công bố số đo mới",
+            "url": "https://www.aljazeera.com/news/2020/12/8/mt-everest-nepal-china-announce-revised-height-at-8848-metres"
+          }
+        },
+        {
+          "id": "q08",
+          "prompt": {
+            "vi": "Việt Nam chính thức trở thành thành viên Tổ chức Thương mại Thế giới (WTO) vào năm nào?",
+            "en": "In what year did Viet Nam officially become a member of the World Trade Organization (WTO)?"
+          },
+          "unit": {
+            "vi": "năm",
+            "en": "year"
+          },
+          "answer": 2007,
+          "year": true,
+          "source": {
+            "label": "WTO, Viet Nam and the WTO",
+            "url": "https://www.wto.org/english/theWTO_e/countries_e/vietnam_e.htm"
+          }
+        },
+        {
+          "id": "q09",
+          "prompt": {
+            "vi": "Đường bờ biển đất liền của Việt Nam dài khoảng bao nhiêu km, theo số liệu thường được công bố chính thức?",
+            "en": "About how long is Viet Nam's mainland coastline, in kilometres, according to the commonly cited official figure?"
+          },
+          "unit": {
+            "vi": "km",
+            "en": "km"
+          },
+          "answer": 3260,
+          "source": {
+            "label": "Nguyễn Đức Toàn (2025), Tạp chí Môi trường số 5/2025",
+            "url": "https://vjol.info.vn/vea/article/download/114250/95622/"
+          }
+        },
+        {
+          "id": "q10",
+          "prompt": {
+            "vi": "Nhà hát Lớn Hà Nội được hoàn thành vào năm nào?",
+            "en": "In what year was the Hanoi Opera House completed?"
+          },
+          "unit": {
+            "vi": "năm",
+            "en": "year"
+          },
+          "answer": 1911,
+          "year": true,
+          "source": {
+            "label": "Báo Văn hóa, Di tích Quốc gia Nhà hát Lớn Hà Nội",
+            "url": "https://baovanhoa.vn/van-hoa/di-tich-quoc-gia-nha-hat-lon-ha-noi-6812.html"
+          }
+        }
+      ]
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "McKenzie, Liersch và Yaniv (2008)",
+      "en": "McKenzie, Liersch and Yaniv (2008)"
+    },
+    "note": {
+      "vi": "Khoảng tin cậy 90% thường chỉ chứa đáp án đúng khoảng một nửa số lần",
+      "en": "90% intervals typically contain the true value only about half of the time"
+    },
+    "hitRate": {
+      "vi": "khoảng 50%",
+      "en": "about 50%"
+    }
+  }
+}

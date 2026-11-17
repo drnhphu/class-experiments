@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Máy giả lập trả lời phiên thu</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!--
+    Phase 2 gate helper: N simulated phones join a real room (opened on control.html) and answer the
+    opening batch through the real phone screens of the engines (rendered off-screen, buttons clicked,
+    inputs filled). Answers are drawn from a seeded generator, so a run can be repeated. Each phone is a
+    named Firebase app with its own anonymous user (same names as tests/load.html, so accounts are reused);
+    it joins and writes with Firestore Lite, one write per step, exactly the payload join.html sends.
+    Afterwards the instructor reveals results on control.html, exports the CSV and checks it by hand.
+  -->
+  <main class="mx-auto max-w-3xl space-y-4 p-4">
+    <h1 class="text-xl font-semibold">Máy giả lập trả lời phiên thu (kiểm thử Giai đoạn 2)</h1>
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      <label>Mã phòng <input id="room" class="w-28 rounded border border-slate-300 px-2 py-1 font-mono uppercase"></label>
+      <label>Số máy <input id="n" type="number" value="12" min="1" max="60" class="w-16 rounded border border-slate-300 px-2 py-1"></label>
+      <label>Hạt giống <input id="seed" type="number" value="1" class="w-16 rounded border border-slate-300 px-2 py-1"></label>
+      <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Chạy</button>
+    </div>
+    <p id="log" class="whitespace-pre-line text-xs text-slate-600"></p>
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500"><tr><th>#</th><th>Mã người dùng</th><th>Bước đã ghi</th><th>Lỗi</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="stage" class="pointer-events-none fixed -left-[2000px] top-0 w-96"></div>
+  </main>
+
+  <script type="module">
+    import { firebaseConfig, initializeApp, getAuth, signInAnonymously } from "../js/firebase.js";
+    import { normalizeRoomCode, responseId } from "../js/room.js";
+    import { loadLang, makeT } from "../js/i18n.js";
+    import { loadCatalog, loadConfig, loadEngine } from "../js/catalog.js";
+    import { parseStepKey } from "../js/session.js";
+    import * as lite from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore-lite.js";
+
+    const $ = (id) => document.getElementById(id);
+    const log = (s) => { $("log").textContent += s + "\n"; };
+    $("room").value = new URLSearchParams(location.search).get("room") || "";
+
+    // Small seeded generator (mulberry32) so runs are repeatable.
+    function rng(seed) {
+      let a = seed >>> 0;
+      return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    }
+    const pickW = (r, items, weights) => { let x = r() * weights.reduce((s, w) => s + w, 0); for (let i = 0; i < items.length; i++) { x -= weights[i]; if (x < 0) return items[i]; } return items.at(-1); };
+
+    // What a simulated person intends to do on one step, given the step's config.
+    function intend(r, config, s) {
+      const sec = 5 + Math.round(r() * 500) / 10;
+      if (s.type === "pricelist") {
+        const n = s.sure.length;
+        if (r() < 0.12) return { rows: s.sure.map((_, j) => ([0, 1, 2, 5, 6].includes(j) ? "gamble" : "sure")), sec };
+        const k = pickW(r, [0, 2, 3, 4, 5, 6, 7, 8, n], [1, 1, 2, 3, 4, 2, 1, 1, 1]);
+        return { rows: s.sure.map((_, j) => (j < k ? "gamble" : "sure")), sec };
+      }
+      if (s.type === "number") return { value: pickW(r, [0, 2, 5, 10, 10, 20, 50, 100, 1000], [1, 1, 2, 3, 2, 2, 1, 1, 1]), sec };
+      if (s.type === "choice") return { value: r() < (s.id === "p1" ? 0.75 : 0.3) ? 0 : 1, sec };
+      if (config.design === "calibration") {
+        const w = pickW(r, [0.01, 0.05, 0.2, 0.6], [2, 3, 2, 1]);
+        return { values: s.questions.map((q) => {
+          const big = Math.abs(q.answer) > 3000, c = q.answer * (1 + (r() - 0.5) * (big ? 0.3 : 0.02)), half = Math.abs(q.answer) * (big ? w : w / 20);
+          return [Math.round(c - half), Math.round(c + half)];
+        }), sec: sec * 3 };
+      }
+      if (config.design === "lossaversion") return { value: pickW(r, [80, 100, 150, 200, 250, 300, 500, s.max], [1, 1, 3, 4, 3, 2, 1, 1]), sec };
+      if (config.design === "bayes") return { value: s.format === "percent" ? pickW(r, [0, 1, 2, 3], [1, 2, 2, 5]) : pickW(r, [0, 1, 2, 3], [1, 4, 2, 3]), sec };
+      if (config.design === "crt") {
+        const kind = pickW(r, ["correct", "intuitive", "other", "timeout"], [4, 5, 1, 1]);
+        return { value: { correct: s.answer, intuitive: s.intuitive, other: s.answer + 7, timeout: null }[kind], sec };
+      }
+      throw new Error(`no generator for ${config.id}#${s.id}`);
+    }
+
+    // Enter the intended answer through the engine's real phone screen; returns { answers, times }.
+    const realNow = performance.now.bind(performance);
+    async function enter(engine, config, step, plan, t) {
+      let clock = realNow(), captured = null;
+      performance.now = () => clock; // fake clock only while this screen is open
+      try {
+        const node = engine.renderStudent(step, config, { lang: config.__lang, t, submit: (a, tm) => { captured = { a, tm }; } });
+        $("stage").replaceChildren(node);
+        const btns = () => [...node.querySelectorAll("button")], ins = () => [...node.querySelectorAll("input")];
+        const set = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
+        if (plan.rows) plan.rows.forEach((v, j) => btns()[2 * j + (v === "sure" ? 0 : 1)].click());
+        else if (plan.values) plan.values.forEach(([lo, hi], q) => { set(ins()[2 * q], lo); set(ins()[2 * q + 1], hi); });
+        else if (ins().length && plan.value != null) set(ins()[0], plan.value);
+        else if (!ins().length) btns()[plan.value].click();
+        clock += plan.sec * 1000;
+        if (config.design === "crt" && plan.value == null) { clock += 120000; await new Promise((r) => setTimeout(r, 500)); }
+        else btns().at(-1).click();
+      } finally { performance.now = realNow; $("stage").replaceChildren(); }
+      if (!captured) throw new Error(`no answer captured for ${config.id}#${step}`);
+      return captured;
+    }
+
+    $("run").onclick = async () => {
+      $("run").disabled = true; $("rows").innerHTML = ""; $("log").textContent = "";
+      try {
+        const code = normalizeRoomCode($("room").value);
+        const N = Math.max(1, Math.min(60, Number($("n").value) || 12)), seed = Number($("seed").value) || 1;
+        for (let i = 1; i <= N; i++) {
+          const app = initializeApp(firebaseConfig, `load-${String(i).padStart(2, "0")}`);
+          const a = getAuth(app);
+          await a.authStateReady();
+          if (!a.currentUser) await signInAnonymously(a);
+          const uid = a.currentUser.uid, ldb = lite.getFirestore(app);
+          const row = document.createElement("tr");
+          row.innerHTML = `<td>${i}</td><td class="font-mono">${uid.slice(0, 8)}</td><td>0</td><td class="text-rose-700"></td>`;
+          $("rows").append(row);
+          const s = (await lite.getDoc(lite.doc(ldb, "sessions", code))).data();
+          if (!s) throw new Error(`Không thấy phòng ${code}`);
+          const t = makeT(await loadLang(s.lang));
+          const catalog = await loadCatalog(s.catalog || "main");
+          await lite.setDoc(lite.doc(ldb, "sessions", code, "participants", uid), { joinedAt: lite.serverTimestamp(), lang: s.lang });
+          const r = rng(seed * 1000 + i);
+          let written = 0;
+          for (const key of s.order || []) {
+            const { exp, step } = parseStepKey(key);
+            if (!(s.collect || []).includes(exp)) continue;
+            const config = { ...(await loadConfig(catalog, exp)), __lang: s.lang };
+            const engine = await loadEngine(catalog, config.engine);
+            const st = config.steps.find((x) => x.id === step);
+            if (i === N && r() < 0.5 && written > 3) break; // last phone leaves early
+            try {
+              const { a: answers, tm: times } = await enter(engine, config, step, intend(r, config, st), t);
+              const payload = { uid, exp, answers, times, updatedAt: lite.serverTimestamp() };
+              if (s.consent) payload.consent = null;
+              await lite.setDoc(lite.doc(ldb, "sessions", code, "responses", responseId(uid, exp)), payload, { merge: true });
+              row.children[2].textContent = String(++written);
+            } catch (e) { row.children[3].textContent += `${key}: ${e.code || e.message} `; }
+          }
+          await lite.updateDoc(lite.doc(ldb, "sessions", code, "participants", uid), { done: true }).catch((e) => { row.children[3].textContent += `done: ${e.code}`; });
+        }
+        log(`Xong ${N} máy.`);
+      } catch (e) { log(`Lỗi: ${e.message}`); }
+      $("run").disabled = false;
+    };
+  </script>
+</body>
+</html>

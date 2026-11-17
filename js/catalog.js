@@ -29,6 +29,7 @@ export async function loadCatalog(name = "main") {
     name,
     enginesBase: index.engines,
     experiments: (index.experiments || []).map((e) => ({ ...e, path: dir + e.file })),
+    defaultOrder: index.defaultOrder || [],
     quizzes: (index.quizzes || []).map((q) => ({ ...q, path: index.quizzesBase + q.file }))
   };
 }
@@ -91,6 +92,11 @@ export function commonErrors(config, catalogName, expectedId) {
       if (ids.some((id) => !/^[a-z0-9]{1,12}$/.test(id || ""))) errs.push("mỗi steps[].id phải gồm chữ thường hoặc số, tối đa 12 ký tự");
       if (new Set(ids).size !== ids.length) errs.push("steps[].id bị trùng");
     }
+  }
+  if (config.separate != null) {
+    const sep = config.separate, ids = (config.steps || []).map((s) => s && s.id);
+    if (!Array.isArray(sep.steps) || sep.steps.length < 2 || sep.steps.some((s) => !ids.includes(s))) errs.push("separate.steps phải liệt kê ít nhất hai steps[].id có trong tệp");
+    if (!Number.isInteger(sep.minGap) || sep.minGap < 1) errs.push("separate.minGap phải là số nguyên từ 1 trở lên");
   }
   bilingualErrors(config, "", errs);
   return errs;

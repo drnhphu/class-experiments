@@ -3,9 +3,56 @@ import { stepsOf } from "./catalog.js";
 
 export const QUIZ_ID = "Q00"; // fixed experiment id used for the end-of-session quiz responses
 
-// Opening-batch order is a list of step keys "EXP#step". Default: each experiment's steps in a row.
-export function buildOrder(collectConfigs) {
-  return collectConfigs.flatMap((c) => stepsOf(c).map((s) => `${c.id}#${s}`));
+// Opening-batch order is a list of step keys "EXP#step". It is built from order items: "EXP" places
+// every not-yet-placed step of EXP in config order, "EXP#step" places one step (used to split E02).
+// Steps that no item placed are appended at the end, so nothing selected is ever dropped.
+export function buildOrder(collectConfigs, items = null) {
+  const byId = new Map(collectConfigs.map((c) => [c.id, c]));
+  const placed = new Set();
+  const out = [];
+  const put = (key) => { if (!placed.has(key)) { placed.add(key); out.push(key); } };
+  for (const it of items || collectConfigs.map((c) => c.id)) {
+    const { exp, step } = parseStepKey(it);
+    const c = byId.get(exp);
+    if (!c) continue;
+    if (step) { if (stepsOf(c).includes(step)) put(`${exp}#${step}`); }
+    else stepsOf(c).forEach((s) => put(`${exp}#${s}`));
+  }
+  for (const c of collectConfigs) stepsOf(c).forEach((s) => put(`${c.id}#${s}`));
+  return out;
+}
+
+// Default arrangement of order items for the selected collect experiments: the catalog's default
+// order (plan: E05, E01, E06, E02 part 1, E09, ...) filtered to the selection, then anything else
+// in selection order. An experiment with "separate" always gets its parts as separate items.
+export function defaultItems(collectConfigs, defaultOrder = []) {
+  const ids = new Set(collectConfigs.map((c) => c.id));
+  const items = (defaultOrder || []).filter((it) => ids.has(parseStepKey(it).exp));
+  for (const c of collectConfigs) {
+    const parts = c.separate?.steps || [];
+    if (parts.length) {
+      for (const s of parts) if (!items.includes(`${c.id}#${s}`)) items.push(`${c.id}#${s}`);
+    } else if (!items.some((it) => parseStepKey(it).exp === c.id)) items.push(c.id);
+  }
+  return items;
+}
+
+// Locked-structure rule that depends on the session order (plan, E02: the two problems at least
+// three experiments apart). Counts distinct other experiments placed between the separated parts.
+export function separationErrors(collectConfigs, order) {
+  const errs = [];
+  for (const c of collectConfigs) {
+    const sep = c.separate;
+    if (!sep?.steps?.length) continue;
+    const pos = sep.steps.map((s) => order.indexOf(`${c.id}#${s}`));
+    for (let i = 1; i < pos.length; i++) {
+      const between = new Set(order.slice(pos[i - 1] + 1, pos[i]).map((k) => parseStepKey(k).exp).filter((e) => e !== c.id));
+      if (pos[i - 1] < 0 || pos[i] < 0 || pos[i] < pos[i - 1] || between.size < sep.minGap) {
+        errs.push(`${c.id}: ${sep.steps[i - 1]} và ${sep.steps[i]} phải theo thứ tự và cách nhau ít nhất ${sep.minGap} thí nghiệm khác trong phiên thu (hiện ${pos[i] > pos[i - 1] ? between.size : 0})`);
+      }
+    }
+  }
+  return errs;
 }
 
 export function parseStepKey(key) {
@@ -43,8 +90,9 @@ export function poolKey(expId, version, lang, orderSig) {
   return `${expId}|${version}|${lang}|${orderSig}`;
 }
 
+// Signature of the opening-batch order at step level, so split placements (E02) count as order.
 export function orderSignature(session, expId) {
-  return (session.collect || []).includes(expId) ? (session.collect || []).join(">") : "live";
+  return (session.collect || []).includes(expId) ? (session.order || []).join(">") : "live";
 }
 
 // ---------- CSV (long format: one row per answered item) ----------

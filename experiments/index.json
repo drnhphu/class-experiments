@@ -1,6 +1,46 @@
 {
   "engines": "engines/",
-  "experiments": [],
+  "experiments": [
+    {
+      "id": "E01",
+      "file": "E01.json"
+    },
+    {
+      "id": "E02",
+      "file": "E02.json"
+    },
+    {
+      "id": "E09",
+      "file": "E09.json"
+    },
+    {
+      "id": "E10",
+      "file": "E10.json"
+    },
+    {
+      "id": "E11",
+      "file": "E11.json"
+    },
+    {
+      "id": "E12",
+      "file": "E12.json"
+    }
+  ],
+  "defaultOrder": [
+    "E05",
+    "E01",
+    "E06",
+    "E02#p1",
+    "E09",
+    "E10",
+    "E07",
+    "E11",
+    "E03",
+    "E02#p2",
+    "E04",
+    "E08",
+    "E12"
+  ],
   "quizzesBase": "quizzes/",
   "quizzes": []
 }

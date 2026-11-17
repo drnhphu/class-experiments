@@ -1,0 +1,76 @@
+{
+  "id": "E01",
+  "engine": "A",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Thái độ với rủi ro: giá trị kỳ vọng, tiện ích kỳ vọng, giá trị tương đương chắc chắn",
+    "en": "Risk attitude: expected value, expected utility, certainty equivalent"
+  },
+  "design": "pricelist",
+  "unit": {
+    "vi": "nghìn đồng",
+    "en": "thousand VND"
+  },
+  "steps": [
+    {
+      "id": "list",
+      "type": "pricelist",
+      "prompt": {
+        "vi": "Một canh bạc tung đồng xu: mặt ngửa bạn nhận 240 nghìn đồng, mặt sấp bạn không nhận gì. Ở mỗi dòng dưới đây, hãy chọn giữa nhận một khoản chắc chắn và chơi canh bạc này. Không có câu trả lời đúng hay sai.",
+        "en": "A coin-flip gamble: heads you get 240 thousand VND, tails you get nothing. On each row below, choose between a sure amount and playing this gamble. There are no right or wrong answers."
+      },
+      "gamble": {
+        "p": 50,
+        "high": 240,
+        "low": 0
+      },
+      "sure": [
+        20,
+        40,
+        60,
+        80,
+        100,
+        120,
+        140,
+        160,
+        180,
+        200,
+        220,
+        240
+      ],
+      "sureLabel": {
+        "vi": "Nhận chắc chắn {x}",
+        "en": "Get {x} for sure"
+      },
+      "gambleLabel": {
+        "vi": "Chơi canh bạc",
+        "en": "Play the gamble"
+      }
+    },
+    {
+      "id": "peter",
+      "type": "number",
+      "prompt": {
+        "vi": "Một trò chơi khác: tung một đồng xu cho đến khi ra mặt ngửa thì dừng. Nếu ngửa ngay lần tung đầu, bạn nhận 2 nghìn đồng. Mỗi lần phải tung thêm, giải thưởng tăng gấp đôi: ngửa ở lần 2 nhận 4, lần 3 nhận 8, lần 4 nhận 16 nghìn đồng, cứ thế tiếp tục. Bạn sẵn lòng trả tối đa bao nhiêu nghìn đồng để được chơi trò này một lần?",
+        "en": "Another game: a coin is flipped until it lands heads. If heads comes on the first flip, you get 2 thousand VND. Each extra flip doubles the prize: heads on flip 2 pays 4, flip 3 pays 8, flip 4 pays 16 thousand VND, and so on. What is the most you would pay, in thousand VND, to play this game once?"
+      },
+      "min": 0,
+      "max": 100000
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Holt và Laury (2002)",
+      "en": "Holt and Laury (2002)"
+    },
+    "note": {
+      "vi": "Nghiên cứu gốc dùng danh sách 10 cặp xổ số, khác cách đo ở đây; với mức thưởng thông thường, đa số người tham gia sợ rủi ro và rất ít người ưa rủi ro",
+      "en": "The original used a list of 10 lottery pairs, a different measure from this one; with normal payoffs most subjects were risk averse and few were risk loving"
+    },
+    "averse": {
+      "vi": "Đa số",
+      "en": "Most"
+    }
+  }
+}
