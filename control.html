@@ -125,7 +125,7 @@
         catch (e) { C.quizChecks.set(q.id, { errors: [e.message] }); }
       }));
 
-      setup.replaceChildren(
+      setup.replaceChildren(...[
         open.length ? card(t("setup.resume"), open.map((s) => el("div", { class: "flex items-center justify-between border-t border-slate-100 py-2" },
           el("span", { class: "font-mono" }, `${s.code} · ${s.info?.date || ""} · ${s.info?.program || ""} ${s.info?.label || ""}`),
           btn(t("setup.resumeBtn"), () => attach(s.code))))) : null,
@@ -138,11 +138,11 @@
                 `${s.code} · ${s.info?.date || ""} · ${t("setup.closedDays", { d: days })}${days >= 30 ? " · " + t("setup.due") : ""}`),
               confirmBtn(t("setup.deleteRaw"), t("setup.confirm"), () => guard(() => deleteRaw(s.code).then(showSetup), t("setup.deleted")), "border border-rose-300 bg-white text-rose-700"));
           })]) : null
-      );
+      ].filter(Boolean)); // replaceChildren would print "null" for empty sections
     }
 
     function card(title, children) {
-      return el("div", { class: "rounded-xl bg-white p-5 shadow-sm space-y-3" }, el("h2", { class: "text-lg font-semibold" }, title), children);
+      return el("div", { class: "rounded-xl bg-white p-5 shadow-sm space-y-3" }, title ? el("h2", { class: "text-lg font-semibold" }, title) : null, children);
     }
 
     function createForm() {
