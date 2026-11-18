@@ -95,8 +95,8 @@
         const set = (fields, note) => { stepNote(note); return updateDoc(sref, fields); };
 
         await setDoc(sref, { owner: auth.currentUser.uid, createdAt: serverTimestamp(), appVersion: "rules-test", catalog: "test", lang: "vi",
-          info: { program: "other", label: "rules test", date: "2000-01-01" }, collect: ["T01"], order: ["T01#s1", "T01#s2"], games: ["T03"],
-          versions: { T01: "1.0", T03: "1.0" }, consent: false, quiz: { id: "quiz-test", version: "1.0", open: false, reveal: false },
+          info: { program: "other", label: "rules test", date: "2000-01-01" }, collect: ["T01", "T02"], order: ["T01#s1", "T01#s2", "T02#s1"], games: ["T03"],
+          versions: { T01: "1.0", T02: "1.0", T03: "1.0" }, consent: false, quiz: { id: "quiz-test", version: "1.0", open: false, reveal: false },
           joinOpen: true, collectOpen: false, reveal: null, game: null, locked: false });
 
         stepNote("Phòng mới, phiên thu khóa");
@@ -116,6 +116,7 @@
         await check("A sửa thời điểm vào phòng của mình", "denied", () => updateDoc(doc(A.db, "sessions", code, "participants", A.uid), { joinedAt: serverTimestamp() }));
         await check("A ghi kèm cờ đồng ý", "allowed", () => resp(A, "T01", { consent: true }));
         await check("A ghi kèm trường lạ", "denied", () => resp(A, "T01", { name: "x" }));
+        await check("A ghi kèm số lần và thời gian rời màn hình", "allowed", () => resp(A, "T01", { times: { s1: 900, "away:s1": 6200, "leaves:s1": 2 } }));
         await check("A ghi T03 khi trò chơi chưa bắt đầu", "denied", () => resp(A, "T03"));
 
         await set({ game: { exp: "T03", phase: "intro", round: 1 } }, "Trò chơi T03, pha giới thiệu");
@@ -129,6 +130,10 @@
         await check("A ghi Q00 khi kiểm tra nhanh chưa mở", "denied", () => resp(A, "Q00"));
         await set({ "quiz.open": true, game: null }, "Mở kiểm tra nhanh");
         await check("A ghi Q00 khi kiểm tra nhanh mở", "allowed", () => resp(A, "Q00"));
+
+        await set({ "quiz.open": false, revealed: ["T01"] }, "Đã mở kết quả T01 (phiên thu vẫn mở)");
+        await check("A ghi T01 sau khi đã mở kết quả T01", "denied", () => resp(A, "T01"), true);
+        await check("A ghi T02 khi T02 chưa mở kết quả", "allowed", () => resp(A, "T02"));
 
         await set({ joinOpen: false }, "Khóa nhận người mới");
         await check("C vào phòng khi đã khóa người mới", "denied", () => join(C));

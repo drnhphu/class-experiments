@@ -48,6 +48,7 @@
     function show(key, build) {
       if (S.viewKey === key) return;
       S.viewKey = key;
+      if (!key.startsWith("collect:")) S.watchKey = null;
       const node = build();
       $("view").replaceChildren(...(node ? [node] : []));
     }
@@ -114,6 +115,7 @@
       } catch (e) { setStatus(`${S.t("join.error")} (${e.code || e.message})`, "bad"); return; }
       S.code = code;
       S.store = localStore(code, S.uid);
+      markVisible(); // the page was closed or reloaded while a watched step was open
       history.replaceState(null, "", `?room=${code}`);
       onSnapshot(doc(db, "sessions", code), onSession, (e) => setStatus(`${S.t("join.error")} (${e.code})`, "bad"));
     }
@@ -169,7 +171,8 @@
 
     function remainingSteps() {
       const s = S.session, done = S.store.get().done || {};
-      return (s.order || []).filter((k) => !done[k] && (s.collect || []).includes(parseStepKey(k).exp));
+      const closed = s.revealed || []; // once its results are shown, an experiment no longer takes answers
+      return (s.order || []).filter((k) => { const e = parseStepKey(k).exp; return !done[k] && (s.collect || []).includes(e) && !closed.includes(e); });
     }
 
     function showConsent() {
@@ -220,10 +223,36 @@
       try {
         const config = await loadConfig(S.catalog, exp);
         const engine = await loadEngine(S.catalog, config.engine);
-        const assignment = await assignmentFor(exp);
-        const ctx = makeCtx(exp, { step, assignment, submit: (answers, times) => {
+        let assignment = await assignmentFor(exp);
+        // Between-subject experiments (config.conditions): wait until the instructor's page has given
+        // this phone its condition, then draw the step.
+        if (Array.isArray(config.conditions) && assignment == null) {
+          if (S.viewKey !== `collect:${key}`) return;
+          box.lastChild.replaceWith(el("p", { class: "text-sm text-slate-500" }, S.t("collect.waitGroup")));
+          const unsub = onSnapshot(doc(db, "sessions", S.code, "assignments", exp), (snap) => {
+            const a = snap.data();
+            if (S.viewKey !== `collect:${key}`) { unsub(); return; }
+            if (a?.byUid?.[S.uid] == null) return;
+            unsub();
+            S.assignCache[exp] = a;
+            renderStep(key, box);
+          });
+          return;
+        }
+        // First time this step appeared on this phone (kept across reloads): timers and response
+        // times count from here, so leaving or reloading does not restart the clock.
+        let startedAt = S.store.get().opened?.[key];
+        if (!startedAt) { startedAt = Date.now(); S.store.update((st) => { st.opened = { ...(st.opened || {}), [key]: startedAt }; return st; }); }
+        const watched = !!config.noLookup;
+        S.watchKey = watched ? key : null;
+        const ctx = makeCtx(exp, { step, assignment, startedAt, submit: (answers, times) => {
           if (S.busy || S.viewKey !== `collect:${key}`) return;
           S.busy = true;
+          if (watched) {
+            const a = S.store.get().away?.[key] || { ms: 0, n: 0 };
+            times = { ...(times || {}), [`away:${step}`]: a.ms, [`leaves:${step}`]: a.n };
+          }
+          S.watchKey = null;
           writeResponse(exp, answers, times);
           S.store.update((st) => { st.done = { ...(st.done || {}), [key]: true }; return st; });
           if (!remainingSteps().length) updateParticipant({ done: true });
@@ -232,11 +261,53 @@
           route();
         } });
         const node = engine.renderStudent(step, config, ctx);
-        if (S.viewKey === `collect:${key}`) box.lastChild.replaceWith(el("div", { class: "rounded-xl bg-white p-4 shadow-sm" }, node));
+        if (S.viewKey !== `collect:${key}`) return;
+        const parts = [];
+        if (watched) {
+          parts.push(el("p", { class: "rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" }, S.t("away.warn")));
+          S.awayNote = el("p", { class: "hidden rounded-lg bg-amber-100 p-3 text-sm font-medium text-amber-900" });
+          parts.push(S.awayNote);
+          const a = S.store.get().away?.[key];
+          if (a?.n) showAwayNote(a);
+        }
+        parts.push(el("div", { class: "rounded-xl bg-white p-4 shadow-sm" }, node));
+        box.lastChild.replaceWith(el("div", { class: "space-y-3" }, ...parts));
       } catch (e) {
         box.lastChild.replaceWith(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`));
       }
     }
+
+    // ---------- leaving the screen during a step with a correct answer (config.noLookup) ----------
+    // Hidden page or closed tab: remember when. Back on the page (or reloaded): add the time away and
+    // one more leave to this step's record; the totals go into the response when the step is sent.
+    function markHidden() {
+      if (!S.store || !S.watchKey) return;
+      const key = S.watchKey;
+      S.store.update((st) => { if (!st.hiddenAt) st.hiddenAt = { key, at: Date.now() }; return st; });
+    }
+    function markVisible() {
+      if (!S.store) return;
+      let back = null;
+      S.store.update((st) => {
+        const h = st.hiddenAt;
+        if (!h) return st;
+        delete st.hiddenAt;
+        if (st.done?.[h.key]) return st;
+        const cur = st.away?.[h.key] || { ms: 0, n: 0 };
+        const next = { ms: cur.ms + Math.max(0, Date.now() - h.at), n: cur.n + 1 };
+        st.away = { ...(st.away || {}), [h.key]: next };
+        back = { key: h.key, ...next };
+        return st;
+      });
+      if (back && back.key === S.watchKey) showAwayNote(back);
+    }
+    function showAwayNote(a) {
+      if (!S.awayNote) return;
+      S.awayNote.textContent = S.t("away.back", { n: a.n, s: Math.round(a.ms / 1000) });
+      S.awayNote.classList.remove("hidden");
+    }
+    document.addEventListener("visibilitychange", () => (document.visibilityState === "hidden" ? markHidden() : markVisible()));
+    window.addEventListener("pagehide", markHidden);
 
     // ---------- personal result after reveal (engine C computes it on the phone) ----------
     function showPersonalResult(exp) {

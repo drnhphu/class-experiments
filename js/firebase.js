@@ -14,7 +14,7 @@ export {
 export {
   doc, collection, query, where, limit, getDoc, getDocFromServer, getDocs, getDocsFromServer,
   setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, Timestamp, writeBatch,
-  waitForPendingWrites, deleteField
+  waitForPendingWrites, deleteField, arrayUnion
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
 export const configMissing = firebaseConfig.apiKey === "REPLACE_ME";

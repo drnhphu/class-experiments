@@ -28,12 +28,12 @@
   <script type="module">
     import {
       auth, db, configMissing, APP_VERSION, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut,
-      doc, collection, query, where, limit, getDoc, getDocs, setDoc, updateDoc, onSnapshot, serverTimestamp, writeBatch
-    } from "./js/firebase.js";
+      doc, collection, query, where, limit, getDoc, getDocs, setDoc, updateDoc, onSnapshot, serverTimestamp, writeBatch, arrayUnion } from "./js/firebase.js";
     import { loadLang, makeT, pick, el } from "./js/i18n.js";
     import { loadCatalog, validateEntry, loadQuiz, quizErrors, loadConfig, loadEngine } from "./js/catalog.js";
     import { newRoomCode } from "./js/room.js";
-    import { buildOrder, defaultItems, separationErrors, parseStepKey, presentView, poolKey, orderSignature, buildCsv, buildArchive, downloadText, QUIZ_ID } from "./js/session.js";
+    import { buildOrder, defaultItems, separationErrors, positionErrors, parseStepKey, presentView, poolKey, orderSignature, buildCsv, buildArchive, downloadText, awayOf, QUIZ_ID } from "./js/session.js";
+    import { leastUsed } from "./js/assign.js";
 
     const $ = (id) => document.getElementById(id);
     const t = makeT(await loadLang("vi")); // the control page is for the instructor: Vietnamese UI
@@ -212,7 +212,7 @@
         const collectCfgs = cfgs.filter((c) => c.engine.mode === "collect").map((c) => c.config);
         const games = cfgs.filter((c) => c.engine.mode === "live").map((c) => c.id);
         const order = buildOrder(collectCfgs, F.order);
-        const sepErrs = separationErrors(collectCfgs, order);
+        const sepErrs = [...positionErrors(collectCfgs, order), ...separationErrors(collectCfgs, order)];
         if (sepErrs.length) throw new Error(sepErrs.join(" "));
         const collect = [...new Set(order.map((k) => parseStepKey(k).exp))];
         const quizId = quizSel.value;
@@ -265,6 +265,7 @@
       C.unsubs.push(onSnapshot(collection(sref, "participants"), (snap) => {
         snap.docChanges().forEach((ch) => ch.type === "removed" ? C.participants.delete(ch.doc.id) : C.participants.set(ch.doc.id, ch.doc.data()));
         renderCounts(); pushPresent();
+        assignLate().catch((e) => setStatus(`${t("err.action")} (${e.code || e.message})`, "bad"));
       }));
       C.unsubs.push(onSnapshot(collection(sref, "responses"), (snap) => {
         snap.docChanges().forEach((ch) => ch.type === "removed" ? C.responses.delete(ch.doc.id) : C.responses.set(ch.doc.id, ch.doc.data()));
@@ -276,7 +277,8 @@
     }
 
     const sref = () => doc(db, "sessions", C.code);
-    const responsesOf = (exp) => [...C.responses.values()].filter((r) => r.exp === exp);
+    const responsesOf = (exp) => [...C.responses.values()].filter((r) => r.exp === exp)
+      .map((r) => ({ ...r, assignment: C.assignments[exp]?.byUid?.[r.uid] ?? null }));
     const uids = () => [...C.participants.keys()];
 
     function renderCounts() {
@@ -284,6 +286,14 @@
       if (!box) return;
       const done = [...C.participants.values()].filter((p) => p.done).length;
       box.textContent = t("live.counts", { joined: C.participants.size, done, docs: C.responses.size });
+      const away = $("away");
+      if (away) {
+        const per = {};
+        for (const r of C.responses.values()) if (awayOf(r.times).flagged) per[r.exp] = (per[r.exp] || 0) + 1;
+        const parts = Object.entries(per).sort().map(([e, n]) => t("live.awayExp", { exp: e, n }));
+        away.textContent = parts.length ? `${t("live.awayTitle")} ${parts.join(" · ")}` : "";
+        away.classList.toggle("hidden", !parts.length);
+      }
     }
 
     function renderLive() {
@@ -314,6 +324,7 @@
               s.collectOpen ? t("live.collectOpen") : t("live.collectClosed")),
             btn(t("live.openCollect"), () => guard(openCollect), primary, !!s.collectOpen),
             btn(t("live.closeCollect"), () => guard(() => updateDoc(sref(), { collectOpen: false })), "border border-slate-300 bg-white", !s.collectOpen)),
+          el("p", { id: "away", class: "hidden rounded-lg border border-amber-300 bg-amber-50 p-2 text-sm font-medium text-amber-900" }),
           el("div", { class: "text-sm text-slate-500" }, t("live.revealHelp")),
           el("div", { class: "flex flex-wrap gap-2" },
             s.collect.map((exp) => btn(`${t("live.reveal")} ${exp}`, () => guard(() => revealExp(exp)),
@@ -373,20 +384,46 @@
     }
 
     // Opening the batch assigns conditions for engines that use them (engine B), then opens the batch.
+    // Reopening the batch never reshuffles: people who already have a condition keep it.
     async function openCollect() {
       for (const exp of C.session.collect) {
         const { config, engine } = await engineFor(exp);
+        if (C.assignments[exp]?.byUid) continue;
         const a = engine.assign(uids(), config);
-        if (a != null) await setDoc(doc(sref(), "assignments", exp), a);
+        if (a != null) { C.assignments[exp] = a; await setDoc(doc(sref(), "assignments", exp), a); }
       }
       await updateDoc(sref(), { collectOpen: true });
+      await assignLate();
+    }
+
+    // People who join while the batch is open get the condition with the fewest people so far,
+    // so groups stay within one person of each other (plan: balanced split, engine B).
+    let assigning = false, assignAgain = false;
+    async function assignLate() {
+      if (!C.session?.collectOpen) return;
+      if (assigning) { assignAgain = true; return; }
+      assigning = true;
+      try {
+        for (const exp of C.session.collect || []) {
+          const a = C.assignments[exp];
+          if (!a?.byUid || !Array.isArray(a.conditions)) continue;
+          const missing = uids().filter((u) => !(u in a.byUid));
+          if (!missing.length) continue;
+          const patch = {};
+          for (const u of missing) { const l = leastUsed(a.byUid, a.conditions); a.byUid[u] = l; patch[`byUid.${u}`] = l; }
+          await updateDoc(doc(sref(), "assignments", exp), patch);
+        }
+      } finally {
+        assigning = false;
+        if (assignAgain) { assignAgain = false; await assignLate(); }
+      }
     }
 
     async function revealExp(exp) {
       const { config, engine } = await engineFor(exp);
       const result = engine.aggregate(responsesOf(exp), config);
       await setDoc(doc(sref(), "results", exp), { result, at: serverTimestamp() });
-      await updateDoc(sref(), { reveal: exp, game: null });
+      await updateDoc(sref(), { reveal: exp, game: null, revealed: arrayUnion(exp) });
     }
 
     async function nextPhase(g) {

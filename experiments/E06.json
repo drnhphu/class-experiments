@@ -1,0 +1,74 @@
+{
+  "id": "E06",
+  "engine": "B",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Hiệu ứng khung: lý thuyết triển vọng, điểm tham chiếu",
+    "en": "Framing effect: prospect theory, reference point"
+  },
+  "design": "framing",
+  "conditions": [
+    "gain",
+    "loss"
+  ],
+  "conditionNames": {
+    "gain": {
+      "vi": "phiên bản giữ được",
+      "en": "gain version"
+    },
+    "loss": {
+      "vi": "phiên bản mất",
+      "en": "loss version"
+    }
+  },
+  "total": 600,
+  "sure": 200,
+  "risky": {
+    "num": 1,
+    "den": 3
+  },
+  "story": {
+    "vi": "Một nhà máy sắp mất hợp đồng với khách hàng lớn nhất. Nếu không làm gì, dự kiến cả 600 công nhân sẽ mất việc. Ban giám đốc đang cân nhắc hai phương án. Bạn chọn phương án nào?",
+    "en": "A factory is about to lose its largest customer contract. If nothing is done, all 600 workers are expected to lose their jobs. Management is weighing two plans. Which plan do you choose?"
+  },
+  "frames": {
+    "gain": {
+      "sure": {
+        "vi": "Phương án A: {n} công nhân giữ được việc làm.",
+        "en": "Plan A: {n} workers keep their jobs."
+      },
+      "risky": {
+        "vi": "Phương án B: xác suất {p} cả {all} công nhân giữ được việc làm, xác suất {q} không ai giữ được việc làm.",
+        "en": "Plan B: a {p} chance that all {all} workers keep their jobs, and a {q} chance that no one keeps their job."
+      }
+    },
+    "loss": {
+      "sure": {
+        "vi": "Phương án A: {n} công nhân sẽ mất việc.",
+        "en": "Plan A: {n} workers will lose their jobs."
+      },
+      "risky": {
+        "vi": "Phương án B: xác suất {p} không ai mất việc, xác suất {q} cả {all} công nhân mất việc.",
+        "en": "Plan B: a {p} chance that no one loses their job, and a {q} chance that all {all} workers lose their jobs."
+      }
+    }
+  },
+  "steps": [
+    {
+      "id": "choice"
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Tversky và Kahneman (1981), N = 152 và 155",
+      "en": "Tversky and Kahneman (1981), N = 152 and 155"
+    },
+    "note": {
+      "vi": "Bài gốc về một dịch bệnh dự kiến làm chết 600 người, cùng cấu trúc số; tỷ lệ là phần chọn phương án chắc chắn",
+      "en": "The original concerned a disease expected to kill 600 people, with the same numbers; shares choosing the sure option"
+    },
+    "gain": 72,
+    "loss": 22
+  }
+}

@@ -67,6 +67,14 @@ export function mergeSparse(counts, min = MIN_CELL) {
   return out;
 }
 
+// Response time in ms since the step first appeared (ctx.startedAt survives reloads); ctx.now lets
+// test harnesses drive the clock.
+export function elapsedClock(ctx) {
+  const now = ctx.now || Date.now;
+  const t0 = ctx.startedAt ?? now();
+  return () => Math.max(0, Math.round(now() - t0));
+}
+
 // ---------- formatting ----------
 export function formatNumber(x, lang = "vi", digits = 2) {
   if (x == null) return "—";

@@ -33,13 +33,15 @@ service cloud.firestore {
     }
 
     // Accept a response only while the room is not closed and one of these is open for this experiment:
-    // the opening batch, the game phase "open", or the end-of-session quiz (fixed id Q00).
+    // the opening batch (until that experiment's results are shown), the game phase "open",
+    // or the end-of-session quiz (fixed id Q00).
     function accepting(code, expId) {
       let s = sessionData(code);
       let game = s.get('game', null);
       let quiz = s.get('quiz', null);
       return s.get('locked', true) == false
-        && ((s.get('collectOpen', false) == true && expId in s.get('collect', []))
+        && ((s.get('collectOpen', false) == true && expId in s.get('collect', [])
+             && !(expId in s.get('revealed', [])))
             || (game != null && game.get('exp', '') == expId && game.get('phase', '') == 'open')
             || (quiz != null && expId == 'Q00' && quiz.get('open', false) == true));
     }

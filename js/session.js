@@ -95,8 +95,34 @@ export function orderSignature(session, expId) {
   return (session.collect || []).includes(expId) ? (session.order || []).join(">") : "live";
 }
 
+// Order rule for experiments that must open the batch (plan, E05: anchoring goes first so that
+// no earlier number acts as an anchor). Config: "position": "first".
+export function positionErrors(collectConfigs, order) {
+  const errs = [];
+  for (const c of collectConfigs) {
+    if (c.position !== "first") continue;
+    const mine = order.map((k, i) => (parseStepKey(k).exp === c.id ? i : -1)).filter((i) => i >= 0);
+    if (mine.some((i, j) => i !== j)) errs.push(`${c.id}: phải đứng đầu phiên thu`);
+  }
+  return errs;
+}
+
+// ---------- leaving the screen (config.noLookup) ----------
+// The phone stores, per step, the time spent away from the page and the number of times it left,
+// in the response's times map under "away:<step>" (ms) and "leaves:<step>".
+export const AWAY_FLAG_MS = 5000;
+export function awayOf(times) {
+  let away = 0, leaves = 0, tracked = false;
+  for (const [k, v] of Object.entries(times || {})) {
+    if (k.startsWith("away:") && Number.isFinite(v)) { away += v; tracked = true; }
+    if (k.startsWith("leaves:") && Number.isFinite(v)) { leaves += v; tracked = true; }
+  }
+  return { tracked, away, leaves, flagged: away > AWAY_FLAG_MS };
+}
+
 // ---------- CSV (long format: one row per answered item) ----------
-const CSV_COLS = ["room", "date", "program", "label", "lang", "uid", "exp", "version", "assignment", "item", "value", "time_ms", "consent"];
+const CSV_COLS = ["room", "date", "program", "label", "lang", "uid", "exp", "version", "assignment", "item", "value", "time_ms", "consent", "leaves", "away_ms", "flag"];
+export const AWAY_FLAG_LABEL = "roi_man_hinh_tren_5_giay";
 
 function csvCell(v) {
   if (v == null) return "";
@@ -110,10 +136,12 @@ export function buildCsv(session, responses, assignments) {
   for (const r of responses) {
     const a = assignments[r.exp]?.byUid?.[r.uid];
     const version = r.exp === QUIZ_ID ? session.quiz?.version : session.versions?.[r.exp];
+    const w = awayOf(r.times);
     for (const [item, value] of Object.entries(r.answers || {})) {
       rows.push([
         session.code, info.date, info.program, info.label, session.lang, r.uid, r.exp, version,
-        a, item, value, r.times?.[item], r.consent
+        a, item, value, r.times?.[item], r.consent,
+        w.tracked ? w.leaves : null, w.tracked ? w.away : null, w.flagged ? AWAY_FLAG_LABEL : null
       ].map(csvCell).join(","));
     }
   }

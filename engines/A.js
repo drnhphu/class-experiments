@@ -5,7 +5,7 @@
 import { el, pick } from "../js/i18n.js";
 import {
   median, pct, round, sum, addCounts, binCounts, formatNumber, fmtPct, fill,
-  threeColumns, barChart, distributionChart, benchmarkLine, heading
+  threeColumns, barChart, distributionChart, benchmarkLine, heading, elapsedClock
 } from "../js/viz.js";
 
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
@@ -169,10 +169,10 @@ function outcomeText(option, config, lang) {
 function renderPricelist(s, config, ctx) {
   const lang = ctx.lang, unit = pick(config.unit, lang);
   const picks = {};
-  const shownAt = performance.now();
+  const elapsed = elapsedClock(ctx);
   const submit = primaryBtn(ctx.t("eng.confirm"), () => {
     if (Object.keys(picks).length < s.sure.length) return;
-    ctx.submit({ ...picks }, { [s.id]: Math.round(performance.now() - shownAt) });
+    ctx.submit({ ...picks }, { [s.id]: elapsed() });
   }, true);
   const rows = s.sure.map((x, i) => {
     const key = rowKey(i);
@@ -196,7 +196,7 @@ function renderPricelist(s, config, ctx) {
 
 function renderNumber(s, config, ctx) {
   const lang = ctx.lang;
-  const shownAt = performance.now();
+  const elapsed = elapsedClock(ctx);
   const input = el("input", { type: "number", inputmode: "decimal", step: "any", min: String(s.min), max: String(s.max),
     class: "w-full rounded-lg border border-slate-300 px-3 py-3 text-lg" });
   const echo = el("p", { class: "text-sm text-slate-500" }, "");
@@ -205,7 +205,7 @@ function renderNumber(s, config, ctx) {
   const go = primaryBtn(ctx.t("eng.confirm"), () => {
     const v = Number(input.value);
     if (input.value === "" || !isNum(v) || v < s.min || v > s.max) { msg.textContent = ctx.t("eng.range", { min: formatNumber(s.min, lang), max: formatNumber(s.max, lang) }); return; }
-    ctx.submit({ [s.id]: v }, { [s.id]: Math.round(performance.now() - shownAt) });
+    ctx.submit({ [s.id]: v }, { [s.id]: elapsed() });
   });
   return box(el("p", { class: "whitespace-pre-line" }, pick(s.prompt, lang)),
     el("label", { class: "block space-y-1" }, el("span", { class: "text-sm text-slate-600" }, pick(config.unit, lang)), input), echo, msg, go);
@@ -213,11 +213,11 @@ function renderNumber(s, config, ctx) {
 
 function renderChoice(s, config, ctx) {
   const lang = ctx.lang;
-  const shownAt = performance.now();
+  const elapsed = elapsedClock(ctx);
   let chosen = null;
   const go = primaryBtn(ctx.t("eng.confirm"), () => {
     if (chosen == null) return;
-    ctx.submit({ [s.id]: chosen }, { [s.id]: Math.round(performance.now() - shownAt) });
+    ctx.submit({ [s.id]: chosen }, { [s.id]: elapsed() });
   }, true);
   const opts = s.options.map((o, i) => el("button", {
     class: "w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-left",

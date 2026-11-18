@@ -5,7 +5,7 @@
 import { el, pick } from "../js/i18n.js";
 import {
   median, mean, pct, round, sum, addCounts, binCounts, formatNumber, fmtPct, fill,
-  threeColumns, barChart, distributionChart, benchmarkLine, heading
+  threeColumns, barChart, distributionChart, benchmarkLine, heading, elapsedClock
 } from "../js/viz.js";
 
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
@@ -171,7 +171,7 @@ const readNum = (input) => (input.value === "" ? null : Number(input.value));
 
 function renderCalibrationStep(s, config, ctx) {
   const { lang, t } = ctx;
-  const shownAt = performance.now();
+  const elapsed = elapsedClock(ctx);
   const msg = el("p", { class: "text-sm text-rose-700" }, "");
   const fields = s.questions.map((q) => {
     const lo = numInput(), hi = numInput();
@@ -195,7 +195,7 @@ function renderCalibrationStep(s, config, ctx) {
       if (!isNum(a) || !isNum(b) || a > b) { msg.textContent = t("c.lowHigh"); return; }
       answers[`${f.q.id}_lo`] = a; answers[`${f.q.id}_hi`] = b;
     }
-    ctx.submit(answers, { [s.id]: Math.round(performance.now() - shownAt) });
+    ctx.submit(answers, { [s.id]: elapsed() });
   });
   return el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, fill(pick(s.prompt, lang), { c: config.confidence }, lang)),
     ...fields.map((f) => f.node), msg, go);
@@ -203,7 +203,7 @@ function renderCalibrationStep(s, config, ctx) {
 
 function renderNumberStep(s, config, ctx, key = s.id) {
   const { lang, t } = ctx;
-  const shownAt = performance.now();
+  const elapsed = elapsedClock(ctx);
   const input = numInput();
   const echo = el("p", { class: "text-sm text-slate-500" }, "");
   const msg = el("p", { class: "text-sm text-rose-700" }, "");
@@ -211,7 +211,7 @@ function renderNumberStep(s, config, ctx, key = s.id) {
   const go = primaryBtn(t("eng.confirm"), () => {
     const v = readNum(input);
     if (!isNum(v) || v < s.min || v > s.max) { msg.textContent = t("eng.range", { min: formatNumber(s.min, lang), max: formatNumber(s.max, lang) }); return; }
-    ctx.submit({ [key]: v }, { [key]: Math.round(performance.now() - shownAt) });
+    ctx.submit({ [key]: v }, { [key]: elapsed() });
   });
   return el("div", { class: "space-y-3" },
     el("p", { class: "whitespace-pre-line" }, fill(pick(s.prompt, lang), { loss: config.gamble?.loss ?? "", unit: pick(config.unit, lang) }, lang)),
@@ -220,9 +220,9 @@ function renderNumberStep(s, config, ctx, key = s.id) {
 
 function renderOptionsStep(s, ctx) {
   const { lang, t } = ctx;
-  const shownAt = performance.now();
+  const elapsed = elapsedClock(ctx);
   let chosen = null;
-  const go = primaryBtn(t("eng.confirm"), () => { if (chosen != null) ctx.submit({ [s.id]: chosen }, { [s.id]: Math.round(performance.now() - shownAt) }); }, true);
+  const go = primaryBtn(t("eng.confirm"), () => { if (chosen != null) ctx.submit({ [s.id]: chosen }, { [s.id]: elapsed() }); }, true);
   const base = "w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-left";
   const opts = s.options.map((o, i) => el("button", { class: base, onclick: (ev) => {
     chosen = i;
@@ -233,32 +233,34 @@ function renderOptionsStep(s, ctx) {
   return el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, pick(s.prompt, lang)), el("div", { class: "grid gap-2" }, opts), go);
 }
 
-// One timed puzzle. When time runs out the answer is recorded as null ("timeout").
+// One timed puzzle. The clock runs in real time from the moment the puzzle first appeared on this
+// phone, also while the page is hidden or being reloaded; when it runs out the answer is null ("timeout").
 function renderTimedStep(s, config, ctx) {
   const { lang, t } = ctx;
   const limit = 1000 * (s.timeLimit ?? config.timeLimit);
-  const start = performance.now();
+  const elapsed = elapsedClock(ctx);
   let done = false;
   const input = numInput();
-  const clock = el("p", { class: "text-sm font-medium text-amber-700" }, t("eng.timeLeft", { s: Math.ceil(limit / 1000) }));
+  const clock = el("p", { class: "text-sm font-medium text-amber-700" }, t("eng.timeLeft", { s: Math.max(0, Math.ceil((limit - elapsed()) / 1000)) }));
   const msg = el("p", { class: "text-sm text-rose-700" }, "");
   const finish = (v) => {
     if (done) return;
     done = true;
     clearInterval(timer);
-    ctx.submit({ [s.id]: v }, { [s.id]: Math.min(Math.round(performance.now() - start), limit) });
+    ctx.submit({ [s.id]: v }, { [s.id]: Math.min(elapsed(), limit) });
   };
   const node = el("div", { class: "space-y-3" }, clock, el("p", { class: "whitespace-pre-line" }, pick(s.prompt, lang)),
     el("label", { class: "block space-y-1" }, el("span", { class: "text-sm text-slate-600" }, pick(s.unit, lang)), input), msg,
     primaryBtn(t("eng.confirm"), () => {
+      if (elapsed() >= limit) { finish(null); return; } // time ran out while away
       const v = readNum(input);
       if (!isNum(v)) { msg.textContent = t("c.needNumber"); return; }
       finish(v);
     }));
+  const born = Date.now();
   const timer = setInterval(() => {
-    const elapsed = performance.now() - start;
-    if (!node.isConnected && elapsed > 3000) { clearInterval(timer); return; } // screen left without answering
-    const left = limit - elapsed;
+    if (!node.isConnected && Date.now() - born > 3000) { clearInterval(timer); return; } // screen left without answering
+    const left = limit - elapsed();
     if (left <= 0) finish(null);
     else clock.textContent = t("eng.timeLeft", { s: Math.ceil(left / 1000) });
   }, 250);

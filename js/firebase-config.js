@@ -12,4 +12,4 @@ export const firebaseConfig = {
 };
 
 // App version, stored with every session so the comparison archive can tell builds apart.
-export const APP_VERSION = "0.2.0-phase2";
+export const APP_VERSION = "0.3.0-phase3";

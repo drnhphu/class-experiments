@@ -8,6 +8,7 @@
     "en": "Cognitive reflection: two systems of thinking"
   },
   "design": "crt",
+  "noLookup": true,
   "timeLimit": 60,
   "steps": [
     {

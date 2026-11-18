@@ -8,6 +8,7 @@
     "en": "Overconfidence in precision"
   },
   "design": "calibration",
+  "noLookup": true,
   "confidence": 90,
   "steps": [
     {

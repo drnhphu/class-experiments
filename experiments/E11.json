@@ -8,6 +8,7 @@
     "en": "Base-rate neglect: Bayes' rule, representativeness heuristic"
   },
   "design": "bayes",
+  "noLookup": true,
   "steps": [
     {
       "id": "r1",

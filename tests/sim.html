@@ -21,11 +21,12 @@
       <label>Mã phòng <input id="room" class="w-28 rounded border border-slate-300 px-2 py-1 font-mono uppercase"></label>
       <label>Số máy <input id="n" type="number" value="12" min="1" max="60" class="w-16 rounded border border-slate-300 px-2 py-1"></label>
       <label>Hạt giống <input id="seed" type="number" value="1" class="w-16 rounded border border-slate-300 px-2 py-1"></label>
-      <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Chạy</button>
+      <button id="joinOnly" class="rounded-lg border border-slate-300 bg-white px-4 py-2 disabled:opacity-40">Chỉ vào phòng</button>
+      <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Vào phòng và trả lời</button>
     </div>
     <p id="log" class="whitespace-pre-line text-xs text-slate-600"></p>
     <table class="w-full text-sm">
-      <thead class="text-left text-slate-500"><tr><th>#</th><th>Mã người dùng</th><th>Bước đã ghi</th><th>Lỗi</th></tr></thead>
+      <thead class="text-left text-slate-500"><tr><th>#</th><th>Mã người dùng</th><th>Bước đã ghi</th><th>Điều kiện thấy trên màn hình</th><th>Lỗi</th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
     <div id="stage" class="pointer-events-none fixed -left-[2000px] top-0 w-96"></div>
@@ -61,6 +62,9 @@
       }
       if (s.type === "number") return { value: pickW(r, [0, 2, 5, 10, 10, 20, 50, 100, 1000], [1, 1, 2, 3, 2, 2, 1, 1, 1]), sec };
       if (s.type === "choice") return { value: r() < (s.id === "p1" ? 0.75 : 0.3) ? 0 : 1, sec };
+      if (s.type === "compare") return { by: { low: r() < 0.9 ? "more" : "less", high: r() < 0.85 ? "less" : "more" }, sec };
+      if (s.type === "estimate") { const base = 8000 * Math.exp((r() - 0.5) * 1.6); return { by: { low: Math.round(base * (0.5 + r() * 0.5)), high: Math.round(base * (1.5 + r() * 2.5)) }, sec }; }
+      if (config.design === "framing") return { by: { gain: r() < 0.7 ? 0 : 1, loss: r() < 0.3 ? 0 : 1 }, sec };
       if (config.design === "calibration") {
         const w = pickW(r, [0.01, 0.05, 0.2, 0.6], [2, 3, 2, 1]);
         return { values: s.questions.map((q) => {
@@ -77,65 +81,107 @@
       throw new Error(`no generator for ${config.id}#${s.id}`);
     }
 
-    // Enter the intended answer through the engine's real phone screen; returns { answers, times }.
-    const realNow = performance.now.bind(performance);
-    async function enter(engine, config, step, plan, t) {
-      let clock = realNow(), captured = null;
-      performance.now = () => clock; // fake clock only while this screen is open
-      try {
-        const node = engine.renderStudent(step, config, { lang: config.__lang, t, submit: (a, tm) => { captured = { a, tm }; } });
-        $("stage").replaceChildren(node);
-        const btns = () => [...node.querySelectorAll("button")], ins = () => [...node.querySelectorAll("input")];
-        const set = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
-        if (plan.rows) plan.rows.forEach((v, j) => btns()[2 * j + (v === "sure" ? 0 : 1)].click());
-        else if (plan.values) plan.values.forEach(([lo, hi], q) => { set(ins()[2 * q], lo); set(ins()[2 * q + 1], hi); });
-        else if (ins().length && plan.value != null) set(ins()[0], plan.value);
-        else if (!ins().length) btns()[plan.value].click();
-        clock += plan.sec * 1000;
-        if (config.design === "crt" && plan.value == null) { clock += 120000; await new Promise((r) => setTimeout(r, 500)); }
-        else btns().at(-1).click();
-      } finally { performance.now = realNow; $("stage").replaceChildren(); }
-      if (!captured) throw new Error(`no answer captured for ${config.id}#${step}`);
-      return captured;
+    // What the phone displayed tells which condition it showed (compared with the CSV afterwards).
+    function seenCondition(config, text) {
+      if (config.design === "anchor") return Object.entries(config.anchors).find(([, a]) => text.includes(`${a.toLocaleString(config.__lang === "en" ? "en-US" : "vi-VN")} `))?.[0] || null;
+      if (config.design === "framing") return text.includes(config.__lang === "en" ? "keep their jobs" : "giữ được việc làm") ? "gain" : "loss";
+      return null;
     }
 
+    // Enter the intended answer through the engine's real phone screen; returns { answers, times, seen }.
+    async function enter(engine, config, step, plan, t, assignment) {
+      let clock = Date.now(), captured = null, seen = null;
+      const node = engine.renderStudent(step, config, { lang: config.__lang, t, assignment, now: () => clock, submit: (a, tm) => { captured = { a, tm }; } });
+      $("stage").replaceChildren(node);
+      try {
+        seen = seenCondition(config, node.innerText);
+        const btns = () => [...node.querySelectorAll("button")], ins = () => [...node.querySelectorAll("input")];
+        const set = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
+        const value = plan.by ? plan.by[assignment] : plan.value;
+        if (plan.rows) plan.rows.forEach((v, j) => btns()[2 * j + (v === "sure" ? 0 : 1)].click());
+        else if (plan.values) plan.values.forEach(([lo, hi], q) => { set(ins()[2 * q], lo); set(ins()[2 * q + 1], hi); });
+        else if (ins().length && value != null) set(ins()[0], value);
+        else if (!ins().length) btns()[typeof value === "number" ? value : (value === "more" ? 0 : 1)].click();
+        clock += plan.sec * 1000;
+        if (config.design === "crt" && value == null) { clock += 120000; await new Promise((r) => setTimeout(r, 500)); }
+        else btns().at(-1).click();
+      } finally { $("stage").replaceChildren(); }
+      if (!captured) throw new Error(`no answer captured for ${config.id}#${step}`);
+      return { ...captured, seen };
+    }
+
+    // Condition given by the instructor's page (engine B); waits up to 30 s for it.
+    async function conditionOf(ldb, code, exp, uid) {
+      for (let k = 0; k < 60; k++) {
+        const a = (await lite.getDoc(lite.doc(ldb, "sessions", code, "assignments", exp))).data();
+        if (a?.byUid?.[uid] != null) return a.byUid[uid];
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      throw new Error(`no condition for ${exp}`);
+    }
+
+    async function phoneOf(i) {
+      const app = initializeApp(firebaseConfig, `load-${String(i).padStart(2, "0")}`);
+      const a = getAuth(app);
+      await a.authStateReady();
+      if (!a.currentUser) await signInAnonymously(a);
+      return { uid: a.currentUser.uid, ldb: lite.getFirestore(app) };
+    }
+    const phones = {};
+    async function joinPhone(i, code) {
+      const p = phones[i] || (phones[i] = await phoneOf(i));
+      if (!p.joined) {
+        const s = (await lite.getDoc(lite.doc(p.ldb, "sessions", code))).data();
+        await lite.setDoc(lite.doc(p.ldb, "sessions", code, "participants", p.uid), { joinedAt: lite.serverTimestamp(), lang: s.lang });
+        p.joined = true;
+      }
+      return p;
+    }
+
+    window.__seen = {};
+    $("joinOnly").onclick = async () => {
+      $("joinOnly").disabled = true;
+      try {
+        const code = normalizeRoomCode($("room").value), N = Math.max(1, Math.min(60, Number($("n").value) || 12));
+        for (let i = 1; i <= N; i++) await joinPhone(i, code);
+        log(`${N} máy đã vào phòng (chưa trả lời).`);
+      } catch (e) { log(`Lỗi: ${e.code || e.message}`); }
+      $("joinOnly").disabled = false;
+    };
+
     $("run").onclick = async () => {
-      $("run").disabled = true; $("rows").innerHTML = ""; $("log").textContent = "";
+      $("run").disabled = true; $("rows").innerHTML = "";
       try {
         const code = normalizeRoomCode($("room").value);
         const N = Math.max(1, Math.min(60, Number($("n").value) || 12)), seed = Number($("seed").value) || 1;
         for (let i = 1; i <= N; i++) {
-          const app = initializeApp(firebaseConfig, `load-${String(i).padStart(2, "0")}`);
-          const a = getAuth(app);
-          await a.authStateReady();
-          if (!a.currentUser) await signInAnonymously(a);
-          const uid = a.currentUser.uid, ldb = lite.getFirestore(app);
+          const { uid, ldb } = await joinPhone(i, code);
           const row = document.createElement("tr");
-          row.innerHTML = `<td>${i}</td><td class="font-mono">${uid.slice(0, 8)}</td><td>0</td><td class="text-rose-700"></td>`;
+          row.innerHTML = `<td>${i}</td><td class="font-mono">${uid.slice(0, 8)}</td><td>0</td><td></td><td class="text-rose-700"></td>`;
           $("rows").append(row);
           const s = (await lite.getDoc(lite.doc(ldb, "sessions", code))).data();
-          if (!s) throw new Error(`Không thấy phòng ${code}`);
           const t = makeT(await loadLang(s.lang));
           const catalog = await loadCatalog(s.catalog || "main");
-          await lite.setDoc(lite.doc(ldb, "sessions", code, "participants", uid), { joinedAt: lite.serverTimestamp(), lang: s.lang });
           const r = rng(seed * 1000 + i);
           let written = 0;
           for (const key of s.order || []) {
             const { exp, step } = parseStepKey(key);
-            if (!(s.collect || []).includes(exp)) continue;
+            if (!(s.collect || []).includes(exp) || (s.revealed || []).includes(exp)) continue;
             const config = { ...(await loadConfig(catalog, exp)), __lang: s.lang };
             const engine = await loadEngine(catalog, config.engine);
             const st = config.steps.find((x) => x.id === step);
             if (i === N && r() < 0.5 && written > 3) break; // last phone leaves early
             try {
-              const { a: answers, tm: times } = await enter(engine, config, step, intend(r, config, st), t);
+              const assignment = Array.isArray(config.conditions) ? await conditionOf(ldb, code, exp, uid) : null;
+              const { a: answers, tm: times, seen } = await enter(engine, config, step, intend(r, config, st), t, assignment);
+              if (seen) { window.__seen[`${uid}|${exp}`] = seen; row.children[3].textContent += `${exp}:${seen} `; }
               const payload = { uid, exp, answers, times, updatedAt: lite.serverTimestamp() };
               if (s.consent) payload.consent = null;
               await lite.setDoc(lite.doc(ldb, "sessions", code, "responses", responseId(uid, exp)), payload, { merge: true });
               row.children[2].textContent = String(++written);
-            } catch (e) { row.children[3].textContent += `${key}: ${e.code || e.message} `; }
+            } catch (e) { row.children[4].textContent += `${key}: ${e.code || e.message} `; }
           }
-          await lite.updateDoc(lite.doc(ldb, "sessions", code, "participants", uid), { done: true }).catch((e) => { row.children[3].textContent += `done: ${e.code}`; });
+          await lite.updateDoc(lite.doc(ldb, "sessions", code, "participants", uid), { done: true }).catch((e) => { row.children[4].textContent += `done: ${e.code}`; });
         }
         log(`Xong ${N} máy.`);
       } catch (e) { log(`Lỗi: ${e.message}`); }

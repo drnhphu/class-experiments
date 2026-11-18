@@ -1,0 +1,81 @@
+{
+  "id": "E05",
+  "engine": "B",
+  "priority": "P1",
+  "version": "1.0",
+  "concept": {
+    "vi": "Thuật giải mỏ neo và điều chỉnh",
+    "en": "Anchoring and adjustment heuristic"
+  },
+  "design": "anchor",
+  "position": "first",
+  "conditions": [
+    "low",
+    "high"
+  ],
+  "conditionNames": {
+    "low": {
+      "vi": "nhóm mỏ neo thấp",
+      "en": "low-anchor group"
+    },
+    "high": {
+      "vi": "nhóm mỏ neo cao",
+      "en": "high-anchor group"
+    }
+  },
+  "unit": {
+    "vi": "km",
+    "en": "km"
+  },
+  "anchors": {
+    "low": 2000,
+    "high": 40000
+  },
+  "truth": 21196,
+  "source": {
+    "label": "CBC News (6/2012), theo khảo sát của Cục Quản lý Di sản Văn hóa Quốc gia Trung Quốc",
+    "url": "https://www.cbc.ca/news/world/great-wall-of-china-even-longer-than-previously-thought-1.1263111"
+  },
+  "steps": [
+    {
+      "id": "cmp",
+      "type": "compare",
+      "prompt": {
+        "vi": "Theo bạn, tổng chiều dài Vạn Lý Trường Thành (Trung Quốc) dài hơn hay ngắn hơn {anchor} {unit}?",
+        "en": "Is the total length of the Great Wall of China more or less than {anchor} {unit}?"
+      },
+      "more": {
+        "vi": "Dài hơn {anchor} {unit}",
+        "en": "More than {anchor} {unit}"
+      },
+      "less": {
+        "vi": "Ngắn hơn {anchor} {unit}",
+        "en": "Less than {anchor} {unit}"
+      }
+    },
+    {
+      "id": "est",
+      "type": "estimate",
+      "prompt": {
+        "vi": "Theo bạn, tổng chiều dài Vạn Lý Trường Thành là bao nhiêu {unit}? Hãy nhập ước lượng tốt nhất của bạn.",
+        "en": "What is your best estimate of the total length of the Great Wall of China, in {unit}?"
+      },
+      "min": 1,
+      "max": 1000000
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Jacowitz và Kahneman (1995), 156 sinh viên, 15 đại lượng",
+      "en": "Jacowitz and Kahneman (1995), 156 students, 15 quantities"
+    },
+    "note": {
+      "vi": "Mỏ neo đặt ở bách phân vị 15 và 85 của một nhóm không có mỏ neo; ở đây hai mỏ neo do giảng viên chọn",
+      "en": "Anchors were set at the 15th and 85th percentiles of an unanchored group; here the instructor chose the anchors"
+    },
+    "index": {
+      "vi": "ước lượng bị kéo về phía mỏ neo",
+      "en": "estimates pulled toward the anchor"
+    }
+  }
+}
