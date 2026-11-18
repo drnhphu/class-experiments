@@ -68,13 +68,15 @@
       const payload = { uid: S.uid, exp, answers, updatedAt: serverTimestamp() };
       if (times) payload.times = times;
       if (S.session?.consent) payload.consent = S.store.get().consent ?? null;
-      trackWrite(setDoc(doc(db, "sessions", S.code, "responses", responseId(S.uid, exp)), payload, { merge: true }));
+      const write = setDoc(doc(db, "sessions", S.code, "responses", responseId(S.uid, exp)), payload, { merge: true });
+      trackWrite(write);
       S.store.update((st) => {
         st.answers = st.answers || {};
         st.answers[exp] = { ...(st.answers[exp] || {}), ...answers };
         if (times) { st.times = st.times || {}; st.times[exp] = { ...(st.times[exp] || {}), ...times }; }
         return st;
       });
+      return write;
     }
 
     function updateParticipant(fields) {
@@ -372,7 +374,13 @@
                 box.replaceChildren(head, card(engine.renderStudent(rk, config, makeCtx(g.exp, { step: rk, round: g.round || 1, assignment,
                   submit: (answers, times) => {
                     if (S.store.get().answers?.[g.exp]?.[rk] != null) return;
-                    writeResponse(g.exp, answers, times);
+                    // A choice the server refuses (the instructor went back a phase just as it was sent)
+                    // is taken back on the phone too, so the choice screen comes again when the round reopens.
+                    writeResponse(g.exp, answers, times).catch((e) => {
+                      if (e.code !== "permission-denied") return;
+                      S.store.update((st) => { for (const k of Object.keys(answers)) delete st.answers?.[g.exp]?.[k]; return st; });
+                      S.viewKey = null; route();
+                    });
                     S.viewKey = null; route();
                   } }))));
               });
