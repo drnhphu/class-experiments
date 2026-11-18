@@ -1,0 +1,22 @@
+{
+  "id": "E13",
+  "engine": "D",
+  "priority": "P1",
+  "version": "1.0",
+  "design": "beauty",
+  "concept": { "vi": "Cuộc thi sắc đẹp Keynes: lý luận nhiều tầng, cân bằng Nash", "en": "Keynesian beauty contest: levels of reasoning, Nash equilibrium" },
+  "rules": {
+    "vi": "Mỗi người chọn một số nguyên từ 0 đến 100. Khi cả lớp chọn xong, app lấy trung bình các số rồi nhân với {p}. Người có số gần kết quả này nhất thắng; nếu nhiều người cùng gần nhất thì cùng thắng. Không có phần thưởng.",
+    "en": "Everyone picks a whole number from 0 to 100. When the whole class has chosen, the app takes the average of all numbers and multiplies it by {p}. Whoever is closest to that result wins; ties share the win. There is no prize."
+  },
+  "prompt": { "vi": "Số bạn chọn (từ 0 đến 100):", "en": "Your number (0 to 100):" },
+  "factor": { "num": 2, "den": 3 },
+  "range": { "min": 0, "max": 100 },
+  "rounds": { "default": 1, "max": 1 },
+  "benchmark": {
+    "label": { "vi": "Nagel (1995), hệ số 2/3, bốn phiên, 67 người, vòng đầu", "en": "Nagel (1995), factor 2/3, four sessions, 67 people, first round" },
+    "mean": 36.73,
+    "median": 33,
+    "note": { "vi": "Số mục tiêu ở cột nghiên cứu gốc tính bằng hệ số nhân trung bình đã công bố", "en": "The original-study target is the published mean times the factor" }
+  }
+}

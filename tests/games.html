@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Máy giả lập chơi trò chơi</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.5"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+  <!--
+    Phase 4 gate helper: N simulated phones join a real room (opened on control.html) and play the games
+    the instructor drives there. Each phone is a named Firebase app with its own anonymous user (same names
+    as tests/load.html and tests/sim.html, so accounts are reused). Like join.html, a phone listens to the
+    session document; when a round opens it reads its seat, draws the engine's real choice screen
+    (off-screen), and records when the screen was ready; then it chooses after a short seeded delay through
+    the screen's own buttons and inputs, and writes the same payload join.html sends. At "reveal" it draws
+    its own result screen. Listening uses the full SDK; reads and writes use Firestore Lite (one request
+    each), as in tests/load.html. Times use this tab's clock; the instructor's click time is compared with it.
+  -->
+  <main class="mx-auto max-w-5xl space-y-4 p-4">
+    <h1 class="text-xl font-semibold">Máy giả lập chơi trò chơi (kiểm thử Giai đoạn 4)</h1>
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+      <label>Mã phòng <input id="room" class="w-28 rounded border border-slate-300 px-2 py-1 font-mono uppercase"></label>
+      <label>Số máy <input id="n" type="number" value="13" min="1" max="60" class="w-16 rounded border border-slate-300 px-2 py-1"></label>
+      <label>Hạt giống <input id="seed" type="number" value="4" class="w-16 rounded border border-slate-300 px-2 py-1"></label>
+      <label>Không chọn <input id="absent" value="" placeholder="3@E14r1 5@E15r1" class="w-48 rounded border border-slate-300 px-2 py-1 font-mono"></label>
+      <button id="join" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40">Vào phòng</button>
+      <label>Vào muộn <input id="late" type="number" value="2" min="1" max="20" class="w-14 rounded border border-slate-300 px-2 py-1"></label>
+      <button id="joinLate" class="rounded-lg border border-slate-300 bg-white px-4 py-2 disabled:opacity-40">Thêm người vào muộn</button>
+    </div>
+    <p id="log" class="whitespace-pre-line text-xs text-slate-600"></p>
+    <table class="w-full text-xs">
+      <thead class="text-left text-slate-500"><tr><th>#</th><th>Mã</th><th>Ghế</th><th>Sự kiện</th><th>Lỗi</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="stage" class="pointer-events-none fixed -left-[2000px] top-0 w-96"></div>
+  </main>
+
+  <script type="module">
+    import { firebaseConfig, initializeApp, getAuth, getFirestore, signInAnonymously, doc, onSnapshot } from "../js/firebase.js";
+    import { normalizeRoomCode, responseId } from "../js/room.js";
+    import { loadLang, makeT } from "../js/i18n.js";
+    import { loadCatalog, loadConfig, loadEngine } from "../js/catalog.js";
+    import * as lite from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore-lite.js";
+
+    const $ = (id) => document.getElementById(id);
+    const log = (s) => { $("log").textContent += s + "\n"; };
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    $("room").value = new URLSearchParams(location.search).get("room") || "";
+
+    function rng(seed) {
+      let a = seed >>> 0;
+      return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    }
+    const pickW = (r, items, weights) => { let x = r() * weights.reduce((s, w) => s + w, 0); for (let i = 0; i < items.length; i++) { x -= weights[i]; if (x < 0) return items[i]; } return items.at(-1); };
+
+    // What a simulated person intends in one round (seeded per phone, game and round).
+    function intent(r, config, seat) {
+      if (config.design === "beauty") return pickW(r, [50, 33, 22, 15, 0, 70], [3, 5, 4, 2, 1, 1]) + Math.floor(r() * 5);
+      if (config.design === "pd") return r() < 0.55 ? "C" : "D";
+      if (seat?.endsWith(".responder")) return { min: pickW(r, [0, 10, 20, 30, 40, 50], [2, 2, 3, 3, 2, 1]) };
+      return { offer: pickW(r, [50, 40, 30, 20, 10, 0], [6, 4, 2, 1, 1, 1]), gift: pickW(r, [0, 10, 20, 30, 50], [3, 2, 2, 2, 2]) };
+    }
+
+    // Fill the engine's real screen and press its buttons; returns { answers, times } or null.
+    async function play(node, config, plan) {
+      const btns = () => [...node.querySelectorAll("button")], ins = () => [...node.querySelectorAll("input")];
+      const set = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
+      if (config.design === "beauty") { set(ins()[0], plan); btns().at(-1).click(); }
+      else if (config.design === "pd") { if (btns().length !== 3) return; btns()[plan === "C" ? 0 : 1].click(); btns().at(-1).click(); }
+      else if (plan.min != null) { if (!ins().length) return; set(ins()[0], plan.min); btns().at(-1).click(); }
+      else { if (!ins().length) return; set(ins()[0], plan.offer); btns().at(-1).click(); await wait(300); set(ins()[0], plan.gift); btns().at(-1).click(); }
+    }
+
+    const phones = [];
+    window.__games = { phones, events: [] };
+    let code = null, t = null, catalog = null;
+
+    async function makePhone(i) {
+      const app = initializeApp(firebaseConfig, `load-${String(i).padStart(2, "0")}`);
+      const a = getAuth(app);
+      await a.authStateReady();
+      if (!a.currentUser) await signInAnonymously(a);
+      const p = { i, uid: a.currentUser.uid, db: getFirestore(app), ldb: lite.getFirestore(app), handled: new Set(), seats: {}, results: {}, answers: {}, row: null };
+      const row = document.createElement("tr");
+      row.className = "border-t border-slate-200 align-top";
+      row.innerHTML = `<td>${i}</td><td class="font-mono">${p.uid.slice(0, 8)}</td><td></td><td></td><td class="text-rose-700"></td>`;
+      $("rows").append(row);
+      p.row = row;
+      return p;
+    }
+    const note = (p, col, text) => { p.row.children[col].textContent += text + " "; };
+    const absentSet = () => new Set($("absent").value.trim().split(/\s+/).filter(Boolean));
+
+    async function onState(p, s) {
+      const g = s?.game;
+      if (!g || s.locked) return;
+      const key = `${g.exp}|${g.round}|${g.phase}`;
+      if (p.handled.has(key)) return;
+      p.handled.add(key);
+      const seenAt = Date.now();
+      try {
+        const config = await loadConfig(catalog, g.exp);
+        const engine = await loadEngine(catalog, config.engine);
+        const rk = `r${g.round}`;
+        if (g.phase === "open") {
+          if (p.answers[g.exp]?.[rk] != null) return;
+          const a = (await lite.getDoc(lite.doc(p.ldb, "sessions", code, "assignments", g.exp))).data();
+          const seat = a?.byUid ? (a.byUid[p.uid] ?? null) : null;
+          p.seats[`${g.exp}${rk}`] = seat;
+          let captured = null;
+          const node = engine.renderStudent(rk, config, { lang: s.lang, t, uid: p.uid, code, exp: g.exp, step: rk, round: g.round, assignment: seat,
+            submit: (ans, tm) => { captured = { ans, tm }; } });
+          const readyAt = Date.now();
+          const late = !!a?.byUid && seat == null;
+          const ev = { i: p.i, uid: p.uid, exp: g.exp, round: g.round, seat, late, seenAt, readyAt, text: node.innerText.slice(0, 160) };
+          window.__games.events.push(ev);
+          note(p, 2, `${g.exp}${rk}:${seat ?? (late ? "muộn" : "-")}`);
+          note(p, 3, `${g.exp}${rk} mở→sẵn ${readyAt - seenAt} ms${late ? " (thông báo vào muộn)" : ""}`);
+          if (late || absentSet().has(`${p.i}@${g.exp}${rk}`)) return;
+          const r = rng(Number($("seed").value) * 100000 + p.i * 100 + Number(g.exp.slice(1)) * 10 + g.round);
+          await wait(1000 + Math.floor(r() * 5000));
+          $("stage").replaceChildren(node);
+          await play(node, config, intent(r, config, seat));
+          $("stage").replaceChildren();
+          if (!captured) { note(p, 4, `${g.exp}${rk}: không ghi được`); return; }
+          await lite.setDoc(lite.doc(p.ldb, "sessions", code, "responses", responseId(p.uid, g.exp)),
+            { uid: p.uid, exp: g.exp, answers: captured.ans, times: captured.tm, updatedAt: lite.serverTimestamp() }, { merge: true });
+          p.answers[g.exp] = { ...(p.answers[g.exp] || {}), ...captured.ans };
+          ev.writtenAt = Date.now();
+          ev.answers = captured.ans;
+        } else if (g.phase === "reveal") {
+          const a = (await lite.getDoc(lite.doc(p.ldb, "sessions", code, "assignments", g.exp))).data();
+          const res = (await lite.getDoc(lite.doc(p.ldb, "sessions", code, "results", g.exp))).data();
+          const seat = a?.byUid ? (a.byUid[p.uid] ?? null) : null;
+          const node = engine.renderStudent("__result", config, { lang: s.lang, t, round: g.round, result: res?.result || null, assignment: seat, myAnswers: p.answers[g.exp] || {} });
+          p.results[`${g.exp}r${g.round}`] = node ? node.innerText : null;
+          window.__games.events.push({ i: p.i, uid: p.uid, exp: g.exp, round: g.round, phase: "reveal", seat, text: node ? node.innerText : null });
+        }
+      } catch (e) { note(p, 4, `${key}: ${e.code || e.message}`); }
+    }
+
+    async function joinPhones(from, to) {
+      for (let i = from; i <= to; i++) {
+        const p = await makePhone(i);
+        const s = (await lite.getDoc(lite.doc(p.ldb, "sessions", code))).data();
+        if (!t) { t = makeT(await loadLang(s.lang)); catalog = await loadCatalog(s.catalog || "main"); }
+        await lite.setDoc(lite.doc(p.ldb, "sessions", code, "participants", p.uid), { joinedAt: lite.serverTimestamp(), lang: s.lang });
+        p.joinedAt = Date.now();
+        phones.push(p);
+        onSnapshot(doc(p.db, "sessions", code), (snap) => onState(p, snap.data()), (e) => note(p, 4, `nghe: ${e.code}`));
+      }
+    }
+
+    $("join").onclick = async () => {
+      $("join").disabled = true;
+      try {
+        code = normalizeRoomCode($("room").value);
+        const N = Math.max(1, Math.min(60, Number($("n").value) || 13));
+        await joinPhones(1, N);
+        log(`${N} máy đã vào phòng ${code} và đang nghe trạng thái.`);
+      } catch (e) { log(`Lỗi: ${e.code || e.message}`); $("join").disabled = false; }
+    };
+    $("joinLate").onclick = async () => {
+      $("joinLate").disabled = true;
+      try {
+        const L = Math.max(1, Number($("late").value) || 1), from = phones.length + 1;
+        await joinPhones(from, from + L - 1);
+        log(`Thêm ${L} máy vào muộn (số ${from} đến ${from + L - 1}).`);
+      } catch (e) { log(`Lỗi: ${e.code || e.message}`); }
+      $("joinLate").disabled = false;
+    };
+  </script>
+</body>
+</html>

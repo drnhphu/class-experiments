@@ -14,7 +14,7 @@
     The room is deleted at the end.
   -->
   <main class="mx-auto max-w-3xl p-4 space-y-4">
-    <h1 class="text-xl font-semibold">Kiểm thử quy tắc bảo mật (Giai đoạn 1)</h1>
+    <h1 class="text-xl font-semibold">Kiểm thử quy tắc bảo mật (Giai đoạn 1 đến 4)</h1>
     <div class="flex gap-2">
       <button id="signIn" class="hidden rounded-lg border border-slate-300 bg-white px-4 py-2">Đăng nhập Google (giảng viên)</button>
       <button id="run" class="rounded-lg bg-slate-900 px-4 py-2 text-white disabled:opacity-40" disabled>Chạy kiểm thử</button>
@@ -91,6 +91,9 @@
         $("who").textContent += ` · phòng thử ${code} · A ${A.uid.slice(0, 6)} · B ${B.uid.slice(0, 6)} · C ${C.uid.slice(0, 6)}`;
         const resp = (P, exp, extra = {}) => setDoc(doc(P.db, "sessions", code, "responses", responseId(P.uid, exp)),
           { uid: P.uid, exp, answers: { s1: 1 }, times: { s1: 900 }, updatedAt: serverTimestamp(), ...extra }, { merge: true });
+        // Game answers (engine D keys): merge write by default, full overwrite when merge is false.
+        const play = (P, answers, times = null, merge = true) => setDoc(doc(P.db, "sessions", code, "responses", responseId(P.uid, "T03")),
+          { uid: P.uid, exp: "T03", answers, ...(times ? { times } : {}), updatedAt: serverTimestamp() }, merge ? { merge: true } : {});
         const join = (P) => setDoc(doc(P.db, "sessions", code, "participants", P.uid), { joinedAt: serverTimestamp(), lang: "vi" });
         const set = (fields, note) => { stepNote(note); return updateDoc(sref, fields); };
 
@@ -121,10 +124,21 @@
 
         await set({ game: { exp: "T03", phase: "intro", round: 1 } }, "Trò chơi T03, pha giới thiệu");
         await check("A ghi T03 ở pha giới thiệu", "denied", () => resp(A, "T03"));
-        await set({ "game.phase": "open" }, "Pha mở");
-        await check("A ghi T03 ở pha mở", "allowed", () => resp(A, "T03"));
+        await set({ "game.phase": "open" }, "Pha mở, vòng 1");
+        await check("A ghi lựa chọn vòng 1 (khóa r1)", "allowed", () => play(A, { r1: 0 }, { r1: 900 }), true);
+        await check("A ghi khóa không thuộc vòng (s1)", "denied", () => resp(A, "T03"), true);
+        await check("A ghi trước lựa chọn vòng 2 (khóa r2)", "denied", () => play(A, { r2: 1 }), true);
+        await check("A gửi lại đúng lựa chọn vòng 1 (thử lại khi mất mạng)", "allowed", () => play(A, { r1: 0 }, { r1: 900 }));
+        await check("A đổi lựa chọn vòng 1", "denied", () => play(A, { r1: 1 }), true);
+        await check("B ghi vòng 1 kèm phần độc tài (r1 và r1d)", "allowed", () => play(B, { r1: 40, r1d: 10 }, { r1: 800, r1d: 700 }));
         await set({ "game.phase": "locked" }, "Pha khóa");
         await check("A ghi T03 ở pha khóa", "denied", () => resp(A, "T03"));
+        await check("B ghi vòng 1 ở pha khóa", "denied", () => play(B, { r1: 40, r1d: 10 }, { r1: 800, r1d: 700 }));
+        await set({ "game.round": 2, "game.phase": "open" }, "Vòng 2, pha mở");
+        await check("A ghi lựa chọn vòng 2", "allowed", () => play(A, { r2: 1 }, { r2: 500 }));
+        await check("A sửa lựa chọn vòng 1 khi đang ở vòng 2", "denied", () => play(A, { r1: 1 }), true);
+        await check("A ghi đè cả bản ghi, bỏ lựa chọn vòng 1", "denied", () => play(A, { r2: 1 }, { r2: 500 }, false), true);
+        await set({ "game.phase": "locked" }, "Vòng 2, pha khóa");
 
         stepNote("Kiểm tra nhanh chưa mở");
         await check("A ghi Q00 khi kiểm tra nhanh chưa mở", "denied", () => resp(A, "Q00"));
@@ -145,7 +159,7 @@
         stepNote("Quyền đọc của giảng viên và kho so sánh");
         let count = -1;
         await check("Giảng viên đọc mọi câu trả lời", "allowed", async () => { count = (await getDocsFromServer(collection(sref, "responses"))).size; });
-        row(`Số bản ghi giảng viên thấy: ${count} (kỳ vọng 5: A_T01, B_T01, A_T02, A_T03, A_Q00)`, "allowed", count === 5 ? "allowed" : `lỗi: ${count}`);
+        row(`Số bản ghi giảng viên thấy: ${count} (kỳ vọng 6: A_T01, B_T01, A_T02, A_T03, B_T03, A_Q00)`, "allowed", count === 6 ? "allowed" : `lỗi: ${count}`);
         await check("B ghi vào kho so sánh", "denied", () => setDoc(doc(B.db, "archive", "probe"), { x: 1 }));
         await check("B đọc kho so sánh", "denied", () => getDocFromServer(doc(B.db, "archive", "probe")));
 

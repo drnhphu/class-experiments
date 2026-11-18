@@ -81,10 +81,14 @@
         const config = await loadConfig(catalog, g.exp);
         const engine = await loadEngine(catalog, config.engine);
         const title = el("h2", { class: "text-4xl font-semibold" }, `${pick(config.concept, lang)} · ${t("game.round", { r: g.round })}`);
-        if (g.phase === "intro") body = el("div", { class: "space-y-6" }, title, el("p", { class: "whitespace-pre-line text-3xl" }, pick(config.rules || config.scenario, lang)));
-        else if (g.phase === "open") body = el("div", { class: "space-y-6" }, title, big(t("present.chosen", { n: g.chosen, joined: m.counts?.joined ?? 0 })));
+        if (g.phase === "intro") {
+          const intro = engine.renderStudent("__intro", config, { lang, t, round: g.round })
+            || el("p", { class: "whitespace-pre-line" }, pick(config.rules || config.scenario, lang));
+          body = el("div", { class: "space-y-6" }, title, el("div", { class: "text-3xl" }, intro));
+        }
+        else if (g.phase === "open") body = el("div", { class: "space-y-6" }, title, big(t("present.chosen", { n: g.chosen, joined: g.expected ?? m.counts?.joined ?? 0 })));
         else if (g.phase === "locked") body = el("div", { class: "space-y-6" }, title, big(t("game.locked")));
-        else body = el("div", { class: "space-y-6" }, title, engine.renderPresenter(g.result, config, [], { lang, t, round: g.round }));
+        else body = el("div", { class: "space-y-6" }, title, engine.renderPresenter(g.result, config, g.history || [], { lang, t, round: g.round }));
       } else if (m.view === "quiz") {
         const q = m.quiz;
         if (q.open) body = el("div", { class: "space-y-6" }, el("h2", { class: "text-4xl font-semibold" }, pick(q.title, lang)),

@@ -1,0 +1,26 @@
+{
+  "id": "E14",
+  "engine": "D",
+  "priority": "P1",
+  "version": "1.0",
+  "design": "pd",
+  "concept": { "vi": "Song tù: chiến lược trội, cân bằng Nash, hiệu quả Pareto", "en": "Prisoner's dilemma: dominant strategy, Nash equilibrium, Pareto efficiency" },
+  "scenario": {
+    "vi": "Bạn và một người khác có hai quầy hàng cạnh nhau, cùng bán một món. Chiều nay mỗi người tự quyết giữ giá hay giảm giá, không bàn trước với nhau. Lợi nhuận chiều nay của mỗi người phụ thuộc vào lựa chọn của cả hai, như bảng dưới. Bạn không biết người cùng cặp là ai. Không có phần thưởng.",
+    "en": "You and another seller run two neighbouring stalls that sell the same item. This afternoon each of you decides, without talking, whether to hold the price or cut it. Each seller's profit depends on both choices, as in the table below. You do not know who your partner is. There is no prize."
+  },
+  "cooperate": { "vi": "Giữ giá", "en": "Hold the price" },
+  "defect": { "vi": "Giảm giá", "en": "Cut the price" },
+  "payoffs": { "T": 500, "R": 300, "P": 100, "S": 0 },
+  "unit": { "vi": "nghìn đồng", "en": "thousand VND" },
+  "rounds": { "default": 1, "max": 5 },
+  "bot": "tit-for-tat",
+  "botNote": {
+    "vi": "Nếu lớp lẻ người, một người sẽ được ghép với máy mà không biết trước và sẽ thấy điều này ở phần kết quả. Máy chơi ăn miếng trả miếng: vòng đầu chọn \"{c}\", từ vòng sau làm theo lựa chọn vòng trước của người cùng cặp. Máy cũng chọn thay cho người không chọn kịp. Lựa chọn của máy không tính vào kết quả của lớp.",
+    "en": "If the class has an odd number of people, one person is paired with the computer without knowing it in advance and will see this in the results. The computer plays tit-for-tat: \"{c}\" in the first round, then whatever its partner chose in the previous round. The computer also chooses for anyone who does not choose in time. The computer's choices do not count in the class results."
+  },
+  "benchmark": {
+    "label": { "vi": "Axelrod (1984)", "en": "Axelrod (1984)" },
+    "note": { "vi": "Trong hai giải đấu máy tính chơi song tù lặp lại (14 rồi 62 chiến lược), chiến lược ăn miếng trả miếng thắng cả hai lần. Điểm trong bảng là số liệu giả định", "en": "In two computer tournaments of the repeated prisoner's dilemma (14, then 62 strategies), tit-for-tat won both. The payoffs in the table are hypothetical" }
+  }
+}

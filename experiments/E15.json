@@ -1,0 +1,48 @@
+{
+  "id": "E15",
+  "engine": "D",
+  "priority": "P1",
+  "version": "1.0",
+  "design": "ultimatum",
+  "concept": { "vi": "Tối hậu thư và độc tài: sở thích công bằng", "en": "Ultimatum and dictator games: fairness preferences" },
+  "rules": {
+    "vi": "Trò chơi theo cặp, ẩn danh. Người chia có {total} điểm và đề nghị cho Người nhận một phần. Cùng lúc đó, Người nhận nêu mức thấp nhất mình chấp nhận, khi chưa thấy đề nghị. Nếu đề nghị từ mức đó trở lên, hai bên chia theo đề nghị; nếu thấp hơn, cả hai được 0 điểm. Không có phần thưởng.",
+    "en": "A game in anonymous pairs. The Proposer has {total} points and offers the Responder a share. At the same time, before seeing the offer, the Responder states the lowest offer they accept. If the offer is at least that, the points are split as offered; if it is lower, both get 0. There is no prize."
+  },
+  "total": 100,
+  "unit": { "vi": "điểm", "en": "points" },
+  "roles": ["proposer", "responder"],
+  "roleNames": {
+    "proposer": { "vi": "Người chia", "en": "Proposer" },
+    "responder": { "vi": "Người nhận", "en": "Responder" }
+  },
+  "offerPrompt": {
+    "vi": "Bạn có {total} điểm. Bạn đề nghị cho Người nhận bao nhiêu điểm?",
+    "en": "You have {total} points. How many points do you offer the Responder?"
+  },
+  "minPrompt": {
+    "vi": "Người chia có {total} điểm và đang đề nghị cách chia. Mức thấp nhất bạn chấp nhận là bao nhiêu điểm? Nếu đề nghị thấp hơn mức này, cả hai được 0 điểm.",
+    "en": "The Proposer has {total} points and is making an offer. What is the lowest offer you accept? If the offer is lower, both of you get 0."
+  },
+  "dictatorPrompt": {
+    "vi": "Phần tiếp theo là bản độc tài: lần này Người nhận cùng cặp không có quyền từ chối. Bạn chia {total} điểm, cho Người nhận bao nhiêu điểm?",
+    "en": "Next comes the dictator version: this time your Responder cannot reject. You split {total} points; how many do you give the Responder?"
+  },
+  "rounds": { "default": 1, "max": 1 },
+  "bot": { "offer": 50, "minAccept": 30 },
+  "botNote": {
+    "vi": "Nếu lớp lẻ người, một người sẽ được ghép với máy mà không biết trước và sẽ thấy điều này ở phần kết quả. Quy tắc cố định của máy: khi là Người chia, máy đề nghị {offer} điểm; khi là Người nhận, máy chấp nhận mọi đề nghị từ {min} điểm trở lên. Máy cũng chọn thay cho người không chọn kịp. Lựa chọn của máy không tính vào kết quả của lớp.",
+    "en": "If the class has an odd number of people, one person is paired with the computer without knowing it in advance and will see this in the results. The computer's fixed rule: as Proposer it offers {offer} points; as Responder it accepts any offer of {min} points or more. The computer also chooses for anyone who does not choose in time. The computer's choices do not count in the class results."
+  },
+  "benchmark": {
+    "label": { "vi": "Güth, Schmittberger và Schwarze (1982); Forsythe và cộng sự (1994)", "en": "Güth, Schmittberger and Schwarze (1982); Forsythe et al. (1994)" },
+    "offerMean": 37,
+    "evenShare": 33,
+    "giftMean": 23,
+    "giftZero": 21,
+    "note": {
+      "vi": "Tối hậu thư: 21 Người chia chưa có kinh nghiệm, trung bình 37% tổng, 7/21 chia đôi. Độc tài: bản trả tiền thật với 10 USD, 24 người, trung bình 23%, 79% có cho (theo tóm tắt của Bolton, Katok và Zwick, 1998). Quy tắc của máy là giả định",
+      "en": "Ultimatum: 21 inexperienced proposers, mean 37% of the total, 7/21 even splits. Dictator: paid condition with 10 USD, 24 people, mean 23%, 79% gave something (as summarized by Bolton, Katok and Zwick, 1998). The computer's rule is hypothetical"
+    }
+  }
+}

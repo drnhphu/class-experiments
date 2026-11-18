@@ -339,8 +339,10 @@
           const head = el("p", { class: "text-xs text-slate-500" }, S.t("game.round", { r: g.round || 1 }));
           let body;
           if (g.phase === "intro") {
-            body = el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, pick(config.rules || config.scenario, S.lang)),
-              el("p", { class: "text-sm text-slate-500" }, S.t("game.waitOpen")));
+            // The engine may draw the rules itself (engine D: payoff table, notice about the machine).
+            const intro = engine.renderStudent("__intro", config, makeCtx(g.exp, { round: g.round || 1 }))
+              || el("p", { class: "whitespace-pre-line" }, pick(config.rules || config.scenario, S.lang));
+            body = el("div", { class: "space-y-3" }, intro, el("p", { class: "text-sm text-slate-500" }, S.t("game.waitOpen")));
           } else if (g.phase === "open") {
             if (answered) body = el("p", { class: "text-lg" }, S.t("game.waitOthers"));
             else {

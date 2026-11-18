@@ -32,9 +32,30 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/sessions/$(code)/participants/$(request.auth.uid));
     }
 
+    // Answer keys of the current game round: "r<k>" and "r<k>d" (engine D, dictator part).
+    function roundKeys(game) {
+      let r = 'r' + string(int(game.get('round', 1)));
+      return [r, r + 'd'];
+    }
+
+    // In a game, a write may only add the current round's keys, and an answer once given cannot change
+    // (an identical retry changes nothing and passes). Earlier rounds stay as they were.
+    function gameAnswersOk(game) {
+      let keys = roundKeys(game);
+      let after = request.resource.data;
+      return (resource == null
+              && after.answers.keys().hasOnly(keys)
+              && after.get('times', {}).keys().hasOnly(keys))
+          || (resource != null
+              && after.answers.diff(resource.data.answers).addedKeys().hasOnly(keys)
+              && after.answers.diff(resource.data.answers).changedKeys().size() == 0
+              && after.answers.diff(resource.data.answers).removedKeys().size() == 0
+              && after.get('times', {}).diff(resource.data.get('times', {})).affectedKeys().hasOnly(keys));
+    }
+
     // Accept a response only while the room is not closed and one of these is open for this experiment:
-    // the opening batch (until that experiment's results are shown), the game phase "open",
-    // or the end-of-session quiz (fixed id Q00).
+    // the opening batch (until that experiment's results are shown), the game phase "open" (current
+    // round's keys only), or the end-of-session quiz (fixed id Q00).
     function accepting(code, expId) {
       let s = sessionData(code);
       let game = s.get('game', null);
@@ -42,7 +63,8 @@ service cloud.firestore {
       return s.get('locked', true) == false
         && ((s.get('collectOpen', false) == true && expId in s.get('collect', [])
              && !(expId in s.get('revealed', [])))
-            || (game != null && game.get('exp', '') == expId && game.get('phase', '') == 'open')
+            || (game != null && game.get('exp', '') == expId && game.get('phase', '') == 'open'
+                && gameAnswersOk(game))
             || (quiz != null && expId == 'Q00' && quiz.get('open', false) == true));
     }
 

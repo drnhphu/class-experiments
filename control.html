@@ -273,6 +273,7 @@
       }));
       C.unsubs.push(onSnapshot(collection(sref, "assignments"), (snap) => {
         snap.docChanges().forEach((ch) => { C.assignments[ch.doc.id] = ch.type === "removed" ? undefined : ch.doc.data(); });
+        pushPresent();
       }));
     }
 
@@ -336,7 +337,7 @@
       if ((s.games || []).length) {
         const g = s.game;
         const picker = el("div", { class: "flex flex-wrap gap-2" }, s.games.map((exp) =>
-          btn(exp, () => guard(() => updateDoc(sref(), { game: { exp, phase: "intro", round: 1 }, reveal: null })),
+          btn(exp, () => guard(() => startGame(exp), s.gameLog?.[exp] && !g ? t("live.gameResumed") : ""),
             g?.exp === exp ? primary : "border border-slate-300 bg-white", !!g && g.exp !== exp)));
         const phases = ["intro", "open", "locked", "reveal"];
         const controls = g ? el("div", { class: "space-y-2" },
@@ -344,11 +345,12 @@
             el("span", { class: "font-medium" }, `${g.exp} · ${t("game.round", { r: g.round })} ·`),
             phases.map((p) => el("span", { class: p === g.phase ? "rounded bg-slate-900 px-2 py-1 text-white" : "px-2 py-1 text-slate-400" }, t(`phase.${p}`))),
             el("span", { id: "gameCount", class: "text-slate-500" })),
+          el("p", { id: "pairsInfo", class: "text-sm text-slate-500" }),
           el("div", { class: "flex flex-wrap gap-2" },
             btn(t("live.phaseNext"), () => guard(() => nextPhase(g)), primary, g.phase === "reveal"),
             btn(t("live.phaseBack"), () => guard(() => prevPhase(g)), "border border-slate-300 bg-white", g.phase === "intro"),
             btn(t("live.nextRound"), () => guard(() => nextRound(g)), "border border-slate-300 bg-white", g.phase !== "reveal"),
-            btn(t("live.endGame"), () => guard(() => updateDoc(sref(), { game: null }))))) : null;
+            btn(t("live.endGame"), () => guard(() => endGame(g))))) : null;
         parts.push(card(t("live.games"), [picker, controls]));
       }
 
@@ -371,11 +373,29 @@
       updateGameCount();
     }
 
+    // Pair games: the assignment of this game (same game id) or null.
+    function pairingOf(g) {
+      const a = C.assignments[g.exp];
+      return a?.kind === "pairs" && a.gameId === g.id ? a : null;
+    }
+    // People expected to choose in this round: those with a seat (pair games) or everyone in the room.
+    function expectedOf(g) {
+      const a = pairingOf(g);
+      return a ? Object.keys(a.byUid).length : C.participants.size;
+    }
+    function chosenOf(g) {
+      const rk = `r${g.round}`;
+      return responsesOf(g.exp).filter((r) => r.answers?.[rk] != null).length;
+    }
+
     function updateGameCount() {
       const g = C.session?.game, node = $("gameCount");
       if (!g || !node) return;
-      const rk = `r${g.round}`;
-      node.textContent = t("live.chosen", { n: responsesOf(g.exp).filter((r) => r.answers?.[rk] != null).length });
+      node.textContent = g.phase === "intro" ? "" : t("live.chosenOf", { n: chosenOf(g), m: expectedOf(g) });
+      const info = $("pairsInfo"), a = pairingOf(g);
+      if (info) info.textContent = a && g.phase !== "intro" ? t("live.pairsInfo", {
+        pairs: new Set(Object.values(a.byUid).map((s) => s.slice(0, s.lastIndexOf(".")))).size,
+        bots: (a.bots || []).length, late: uids().filter((u) => !(u in a.byUid)).length }) : "";
     }
 
     async function engineFor(exp) {
@@ -426,11 +446,33 @@
       await updateDoc(sref(), { reveal: exp, game: null, revealed: arrayUnion(exp) });
     }
 
+    // A game keeps an id from its first start, so its pairs survive going back a phase, later rounds,
+    // and ending then picking the game again (which resumes it where it stopped: answers already
+    // given cannot be given again).
+    async function startGame(exp) {
+      const s = C.session, log = s.gameLog?.[exp];
+      const game = log ? { exp, ...log } : { exp, phase: "intro", round: 1, id: Math.random().toString(36).slice(2, 10) };
+      await updateDoc(sref(), { game, reveal: null });
+    }
+
+    async function endGame(g) {
+      await updateDoc(sref(), { game: null, [`gameLog.${g.exp}`]: { phase: g.phase, round: g.round, id: g.id ?? null } });
+    }
+
+    // Pairs (engine D) are made when a round opens; people already seated keep their seat.
+    async function seat(g, config, engine, round) {
+      const a = engine.assign(uids(), config, pairingOf(g));
+      if (a != null) {
+        const docA = { ...a, round, gameId: g.id ?? null };
+        C.assignments[g.exp] = docA; // the next count and projector update use it right away
+        await setDoc(doc(sref(), "assignments", g.exp), docA);
+      }
+    }
+
     async function nextPhase(g) {
       const { config, engine } = await engineFor(g.exp);
       if (g.phase === "intro") {
-        const a = engine.assign(uids(), config);
-        if (a != null) await setDoc(doc(sref(), "assignments", g.exp), { ...a, round: g.round });
+        await seat(g, config, engine, g.round);
         await updateDoc(sref(), { "game.phase": "open" });
       } else if (g.phase === "open") {
         await updateDoc(sref(), { "game.phase": "locked" });
@@ -452,9 +494,8 @@
       const { config, engine } = await engineFor(g.exp);
       const max = config.rounds?.max ?? 1;
       if (g.round >= max) throw new Error(t("live.maxRound", { max }));
-      const a = engine.assign(uids(), config);
-      if (a != null) await setDoc(doc(sref(), "assignments", g.exp), { ...a, round: g.round + 1 });
-      await updateDoc(sref(), { game: { exp: g.exp, phase: "open", round: g.round + 1 } });
+      await seat(g, config, engine, g.round + 1);
+      await updateDoc(sref(), { game: { ...g, phase: "open", round: g.round + 1 } });
     }
 
     // ---------- projector feed (BroadcastChannel, no Firestore reads on the projector) ----------
@@ -488,11 +529,12 @@
           const { config, engine } = await engineFor(s.reveal);
           msg.reveal = { exp: s.reveal, result: engine.aggregate(responsesOf(s.reveal), config), history: await historyFor(s.reveal) };
         } else if (view === "game") {
-          const g = s.game, rk = `r${g.round}`;
-          msg.game = { ...g, chosen: responsesOf(g.exp).filter((r) => r.answers?.[rk] != null).length };
+          const g = s.game;
+          msg.game = { ...g, chosen: chosenOf(g), expected: expectedOf(g) };
           if (g.phase === "reveal") {
             const { config, engine } = await engineFor(g.exp);
             msg.game.result = engine.aggregate(responsesOf(g.exp), config);
+            msg.game.history = await historyFor(g.exp);
           }
         } else if (view === "quiz") {
           const quiz = await loadQuiz(C.catalog, s.quiz.id);

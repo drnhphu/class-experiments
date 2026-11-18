@@ -19,6 +19,7 @@ const TD = {
   assign(participants) { return { present: participants.length }; },
 
   renderStudent(step, config, ctx) {
+    if (step === "__intro") return null; // pages fall back to config.rules
     if (step === "__result") {
       const round = ctx.round;
       const counts = ctx.result?.rounds?.[`r${round}`] || [];
