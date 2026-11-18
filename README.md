@@ -57,6 +57,7 @@ Quy ước khung lõi thêm vào giao diện:
 | E10 | C, `lossaversion` | `gain` | `gain` = mức thắng tối thiểu; λ = `gain` / khoản thua |
 | E11 | C, `bayes` | `r1` (dạng phần trăm), `r2` (dạng tần suất) | `r1`, `r2` = chỉ số phương án |
 | E12 | C, `crt` | `q1`, `q2`, `q3`, mỗi câu có đồng hồ | `q1`... = số trả lời; ô trống = hết giờ |
+| S12 | C, `stroop` (bài Stroop đi kèm E12, tệp riêng, đứng sau E12) | `trials` | `trials` = mọi lượt dạng `khớp,mực,chữ,bấm,ms` nối bằng `;` (ms trống nếu rời màn hình); `rtC`, `rtI` = trung vị ms lượt khớp và lệch; `errC`, `errI` = số lần bấm sai |
 
 Thứ tự mặc định trong phiên thu nằm ở `defaultOrder` của `experiments/index.json` (theo kế hoạch: E05, E01, E06, E02 bài 1, E09, E10, E07, E11, E03, E02 bài 2, E04, E08, E12), lọc theo các thí nghiệm được chọn. Thí nghiệm có `separate` (như E02) được chia thành từng phần riêng trong thứ tự; trang điều khiển chặn tạo phòng nếu hai phần không cách nhau đủ `minGap` thí nghiệm khác. Kho so sánh chỉ cộng dồn các lớp có cùng thứ tự đến từng bước.
 
@@ -73,6 +74,7 @@ Giai đoạn 5 (thí nghiệm P2) chỉ thêm thiết kế mới vào động c�
 - `presentbias`: mỗi câu là khoản nhỏ nhận sớm so với khoản lớn nhận muộn; hai câu cùng hai số tiền và cùng khoảng chờ; câu một bắt đầu hôm nay, câu hai lùi xa ít nhất 26 tuần.
 - `decoy`: đúng hai thuộc tính bằng số, mỗi thuộc tính ghi rõ cao hơn hay thấp hơn là tốt; phương án mục tiêu và đối thủ đánh đổi nhau; mồi bị mục tiêu trội ở cả hai thuộc tính và không bị đối thủ trội; không dùng hình ảnh.
 - `default`: hai phiên bản dùng chung một đoạn mô tả và một nhãn ô, chỉ khác ô đánh dấu sẵn hay để trống; đổi lựa chọn tốn đúng một chạm ở cả hai.
+- `stroop` (S12, Kane chọn đặt thành tệp riêng ngày 19/11/2026 để không đổi E12): 3 đến 6 màu, mỗi màu có mã mực và chữ khác nhau; số lượt chữ khớp màu bằng số lượt chữ lệch màu, tổng 16 đến 60; không có hai lượt liền nhau cùng màu mực; chỉ tính lượt bấm đúng trong khoảng `rtMin` đến `rtMax` ms và không rời màn hình.
 
 Mọi chữ học viên đọc nằm trong tệp cấu hình; sửa chữ hoặc số thì tăng `version`. Bộ 10 câu của E09 có nguồn kiểm chứng trong từng câu (`source`).
 

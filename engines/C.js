@@ -1,6 +1,7 @@
 // Engine C: measures each person and scores them on the phone (no extra writes for the score).
 // Designs: "calibration" (E09, 90% intervals), "lossaversion" (E10, lambda = gain / loss),
-// "bayes" (E11, percent format then frequency format), "crt" (E12, three timed puzzles).
+// "bayes" (E11, percent format then frequency format), "crt" (E12, three timed puzzles),
+// "stroop" (S12, a separate task placed after E12: tap the ink colour of colour words).
 // All wording students read comes from the config file; generic UI words come from lang/*.json.
 import { el, pick } from "../js/i18n.js";
 import {
@@ -161,7 +162,68 @@ function validateCrt(config) {
   return errs;
 }
 
-const VALIDATORS = { calibration: validateCalibration, lossaversion: validateLoss, bayes: validateBayes, crt: validateCrt };
+// ---------- Stroop (S12) ----------
+// Answer key s.id holds every trial as "congruent,ink,word,response,ms" joined by ";" (ms empty when
+// the screen was left during the trial); rtC, rtI, errC, errI are copies of the person's summary for
+// the CSV. Medians use correct taps between rtMin and rtMax only.
+function validateStroop(config) {
+  const errs = [];
+  const st = steps(config);
+  if (st.length !== 1 || st[0]?.type !== "stroop") errs.push("C/stroop: cần đúng một bước type \"stroop\"");
+  if (!bilingual(config.intro)) errs.push("C/stroop: thiếu intro (hướng dẫn trước khi bắt đầu)");
+  const cs = config.colors;
+  if (!Array.isArray(cs) || cs.length < 3 || cs.length > 6) return [...errs, "C/stroop: colors cần từ 3 đến 6 màu"];
+  if (cs.some((c) => !/^[a-z]{1,8}$/.test(c?.id || "") || !bilingual(c.name) || !/^#[0-9a-fA-F]{6}$/.test(c.ink || ""))) {
+    return [...errs, "C/stroop: mỗi màu cần id ngắn chữ thường, name (chữ hiện ra, Việt và Anh) và ink dạng #rrggbb"];
+  }
+  if (new Set(cs.map((c) => c.id)).size !== cs.length) errs.push("C/stroop: id màu bị trùng");
+  if (new Set(cs.map((c) => c.ink.toLowerCase())).size !== cs.length) errs.push("C/stroop: hai màu trùng mã mực (ink)");
+  for (const L of ["vi", "en"]) if (new Set(cs.map((c) => c.name[L].trim().toLowerCase())).size !== cs.length) errs.push(`C/stroop: hai màu trùng chữ (${L})`);
+  const { congruentPerColor: kc, incongruentPerPair: ki } = config;
+  if (!Number.isInteger(kc) || !Number.isInteger(ki) || kc < 1 || ki < 1) errs.push("C/stroop: congruentPerColor và incongruentPerPair phải là số nguyên dương");
+  else {
+    const nC = cs.length * kc, nI = cs.length * (cs.length - 1) * ki;
+    if (nC !== nI) errs.push(`C/stroop: số lượt chữ khớp màu (${nC}) phải bằng số lượt chữ lệch màu (${nI})`);
+    if (nC + nI < 16 || nC + nI > 60) errs.push(`C/stroop: tổng số lượt phải từ 16 đến 60 (đang là ${nC + nI})`);
+  }
+  if (!isNum(config.rtMin) || !isNum(config.rtMax) || config.rtMin < 100 || config.rtMax > 5000 || config.rtMin >= config.rtMax) errs.push("C/stroop: cần 100 ≤ rtMin < rtMax ≤ 5000 (ms, lượt ngoài khoảng này bị bỏ)");
+  if (!Number.isInteger(config.gap) || config.gap < 200 || config.gap > 1500) errs.push("C/stroop: gap (khoảng nghỉ giữa hai lượt, ms) phải là số nguyên từ 200 đến 1500");
+  return errs;
+}
+
+// All trials in random order, never the same ink twice in a row: each turn is drawn at random from
+// the turns left whose ink differs from the last one; a dead end (about one try in five) starts over.
+function stroopTrials(config, rnd = Math.random) {
+  const ids = config.colors.map((c) => c.id), pool = [];
+  for (const c of ids) for (let k = 0; k < config.congruentPerColor; k++) pool.push({ c: 1, ink: c, word: c });
+  for (const ink of ids) for (const word of ids) if (word !== ink) for (let k = 0; k < config.incongruentPerPair; k++) pool.push({ c: 0, ink, word });
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const left = [...pool], out = [];
+    while (left.length) {
+      const ok = left.filter((x) => x.ink !== out.at(-1)?.ink);
+      if (!ok.length) break;
+      const x = ok[Math.floor(rnd() * ok.length)];
+      left.splice(left.indexOf(x), 1);
+      out.push(x);
+    }
+    if (out.length === pool.length) return out;
+  }
+  return pool; // not reached with the allowed colour counts
+}
+
+function stroopScore(raw, config) {
+  if (typeof raw !== "string" || !raw) return null;
+  const trials = raw.split(";").map((x) => { const [c, ink, word, resp, ms] = x.split(","); return { c: c === "1", ink, word, resp, rt: ms === "" ? null : Number(ms) }; });
+  const ok = (x) => x.resp === x.ink && isNum(x.rt) && x.rt >= config.rtMin && x.rt <= config.rtMax;
+  const rtC = median(trials.filter((x) => x.c && ok(x)).map((x) => x.rt));
+  const rtI = median(trials.filter((x) => !x.c && ok(x)).map((x) => x.rt));
+  const nC = trials.filter((x) => x.c).length, nI = trials.length - nC;
+  const errC = trials.filter((x) => x.c && x.resp !== x.ink).length, errI = trials.filter((x) => !x.c && x.resp !== x.ink).length;
+  const d = isNum(rtC) && isNum(rtI) ? rtI - rtC : null;
+  return { rtC, rtI, d, slower: d == null ? null : (100 * d) / rtC, nC, nI, errC, errI };
+}
+
+const VALIDATORS = { calibration: validateCalibration, lossaversion: validateLoss, bayes: validateBayes, crt: validateCrt, stroop: validateStroop };
 
 // ---------- phone screens ----------
 const primaryBtn = (label, onclick, disabled = false) =>
@@ -267,6 +329,50 @@ function renderTimedStep(s, config, ctx) {
   return node;
 }
 
+function renderStroopStep(s, config, ctx) {
+  const { lang, t } = ctx;
+  const now = ctx.now || (() => performance.now());
+  const cs = config.colors, byId = Object.fromEntries(cs.map((c) => [c.id, c]));
+  const trials = stroopTrials(config);
+  const rec = [];
+  let i = -1, t0 = null, away = false, started = null;
+  const word = el("p", { class: "flex h-32 select-none items-center justify-center text-5xl font-bold tracking-wide" }, "");
+  const progress = el("p", { class: "text-sm text-slate-500" }, "");
+  const pad = el("div", { class: "grid grid-cols-2 gap-3" }, ...cs.map((c) =>
+    el("button", { class: "rounded-lg border border-slate-300 bg-white py-4 text-lg font-semibold text-slate-900", "data-color": c.id, onclick: () => tap(c.id) }, pick(c.name, lang))));
+  const task = el("div", { class: "hidden space-y-3" }, progress, word, pad);
+  const onVis = () => { if (document.hidden) away = true; };
+  const node = el("div", { class: "space-y-3" },
+    el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, fill(pick(config.intro, lang), { n: trials.length }, lang)),
+      primaryBtn(t("c.stroopStart"), (ev) => { ev.currentTarget.parentNode.remove(); task.classList.remove("hidden"); document.addEventListener("visibilitychange", onVis); started = now(); next(); })),
+    task);
+  function next() {
+    i++;
+    if (i >= trials.length) return finish();
+    progress.textContent = t("c.stroopProgress", { k: i + 1, n: trials.length });
+    word.textContent = "+"; word.style.color = "#94a3b8"; t0 = null;
+    setTimeout(() => {
+      if (!node.isConnected) return;
+      const tr = trials[i];
+      word.textContent = pick(byId[tr.word].name, lang); word.style.color = byId[tr.ink].ink;
+      away = document.hidden; t0 = now();
+    }, config.gap);
+  }
+  function tap(id) {
+    if (t0 == null) return; // between trials
+    const rt = Math.round(now() - t0); t0 = null;
+    rec.push({ ...trials[i], resp: id, rt: away ? null : rt });
+    next();
+  }
+  function finish() {
+    document.removeEventListener("visibilitychange", onVis);
+    const raw = rec.map((r) => [r.c, r.ink, r.word, r.resp, r.rt ?? ""].join(",")).join(";");
+    const sc = stroopScore(raw, config);
+    ctx.submit({ [s.id]: raw, rtC: sc.rtC, rtI: sc.rtI, errC: sc.errC, errI: sc.errI }, { [s.id]: Math.round(now() - started) });
+  }
+  return node;
+}
+
 // ---------- personal results (phone, after reveal) ----------
 function renderPersonal(config, ctx) {
   const { lang, t } = ctx;
@@ -299,6 +405,14 @@ function renderPersonal(config, ctx) {
         el("p", {}, t("c.correctIs", { a: pick(s.options[s.answer].text, lang) })),
         el("p", { class: "whitespace-pre-line text-sm text-slate-600" }, pick(s.explain, lang))));
     });
+  } else if (config.design === "stroop") {
+    const ms = (x) => formatNumber(round(x, 0), lang);
+    if (sc && isNum(sc.d)) {
+      parts.push(el("p", { class: "text-lg" }, t("c.stroopYou", { c: ms(sc.rtC), i: ms(sc.rtI) })));
+      parts.push(el("p", {}, t("c.stroopYouDelay", { d: ms(sc.d), p: formatNumber(round(sc.slower, 0), lang) })));
+    } else parts.push(el("p", {}, t("c.stroopNoData")));
+    if (sc) parts.push(el("p", { class: "text-sm text-slate-600" }, t("c.stroopErrors", { ei: sc.errI, ni: sc.nI, ec: sc.errC, nc: sc.nC })));
+    parts.push(el("p", { class: "text-sm text-slate-600" }, t("c.stroopExplain")));
   } else if (config.design === "crt") {
     parts.push(el("p", { class: "text-lg" }, t("c.youScore", { k: sc.score, n: sc.total })));
     steps(config).forEach((s, i) => {
@@ -374,6 +488,40 @@ function aggregateCrt(responses, config) {
 }
 
 // ---------- projector ----------
+function aggregateStroop(responses, config) {
+  const key = steps(config)[0].id;
+  const sc = responses.map((r) => stroopScore(r.answers?.[key], config)).filter(Boolean);
+  const full = sc.filter((x) => isNum(x.d));
+  return { design: "stroop", n: full.length, rtC: full.map((x) => x.rtC), rtI: full.map((x) => x.rtI), d: full.map((x) => x.d),
+    slower: full.map((x) => x.slower), errC: sum(sc.map((x) => x.errC)), errI: sum(sc.map((x) => x.errI)), nC: sum(sc.map((x) => x.nC)), nI: sum(sc.map((x) => x.nI)) };
+}
+
+const STROOP_EDGES = [-Infinity, 0, 50, 100, 150, 200, 300, Infinity];
+function presentStroop(result, config, history, ctx) {
+  const { lang, t } = ctx;
+  const earlier = (history || []).filter((h) => h?.design === "stroop" && Array.isArray(h.d));
+  const e = { rtC: earlier.flatMap((h) => h.rtC), rtI: earlier.flatMap((h) => h.rtI), d: earlier.flatMap((h) => h.d), slower: earlier.flatMap((h) => h.slower),
+    errI: sum(earlier.map((h) => h.errI)), nI: sum(earlier.map((h) => h.nI)) };
+  const has = e.d.length > 0;
+  const ms = (x) => (isNum(x) ? formatNumber(round(x, 0), lang) : "—");
+  const last = STROOP_EDGES.length - 2;
+  const label = (from, to) => (from === 0 && to === last ? t("c.stroopAll") : from === 0 ? `< ${formatNumber(STROOP_EDGES[to + 1], lang)}` : to === last ? `≥ ${formatNumber(STROOP_EDGES[from], lang)}` : `${formatNumber(STROOP_EDGES[from], lang)}–${formatNumber(STROOP_EDGES[to + 1], lang)}`);
+  const rows = [
+    { label: t("c.stroopMedC"), mine: ms(median(result.rtC)), earlier: has ? ms(median(e.rtC)) : null, original: null },
+    { label: t("c.stroopMedI"), mine: ms(median(result.rtI)), earlier: has ? ms(median(e.rtI)) : null, original: null },
+    { label: t("c.stroopDelay"), mine: ms(median(result.d)), earlier: has ? ms(median(e.d)) : null, original: null },
+    { label: t("c.stroopSlowerPct"), mine: fmtPct(median(result.slower), lang), earlier: has ? fmtPct(median(e.slower), lang) : null, original: null },
+    { label: t("c.stroopShareSlower"), mine: fmtPct(pct(result.d.filter((x) => x > 0).length, result.n), lang), earlier: has ? fmtPct(pct(e.d.filter((x) => x > 0).length, e.d.length), lang) : null, original: null },
+    { label: t("c.stroopErrRate"), mine: fmtPct(pct(result.errI, result.nI), lang), earlier: has ? fmtPct(pct(e.errI, e.nI), lang) : null, original: null }
+  ];
+  return el("div", { class: "space-y-6" },
+    heading(t("c.stroopTitle")),
+    distributionChart(binCounts(result.d, STROOP_EDGES), label, ctx, { earlier: has ? binCounts(e.d, STROOP_EDGES) : null, height: 280 }),
+    el("p", { class: "text-base text-slate-500" }, t("c.stroopNote", { min: config.rtMin, max: formatNumber(config.rtMax, lang) })),
+    threeColumns(rows, ctx, { mine: result.n, earlier: e.d.length }),
+    benchmarkLine(config.benchmark, lang));
+}
+
 const meanFromCounts = (counts) => { const n = sum(counts); return n ? sum(counts.map((c, i) => c * i)) / n : null; };
 
 function presentCalibration(result, config, history, ctx) {
@@ -495,7 +643,7 @@ const C = {
 
   validate(config) {
     const v = VALIDATORS[config.design];
-    return v ? v(config) : [`C: design "${config.design}" không hợp lệ (calibration, lossaversion, bayes, crt)`];
+    return v ? v(config) : [`C: design "${config.design}" không hợp lệ (calibration, lossaversion, bayes, crt, stroop)`];
   },
 
   assign() { return null; },
@@ -507,6 +655,7 @@ const C = {
     if (config.design === "calibration") return renderCalibrationStep(s, config, ctx);
     if (config.design === "lossaversion") return renderNumberStep(s, config, ctx);
     if (config.design === "bayes") return renderOptionsStep(s, ctx);
+    if (config.design === "stroop") return renderStroopStep(s, config, ctx);
     return renderTimedStep(s, config, ctx);
   },
 
@@ -523,6 +672,7 @@ const C = {
         return { choice: Number.isInteger(v) ? v : null, correct: v === s.answer };
       }) };
     }
+    if (config.design === "stroop") return stroopScore(answers[steps(config)[0].id], config);
     return scoreCrt(answers, config);
   },
 
@@ -530,6 +680,7 @@ const C = {
     if (config.design === "calibration") return aggregateCalibration(responses, config);
     if (config.design === "lossaversion") return aggregateLoss(responses, config);
     if (config.design === "bayes") return aggregateBayes(responses, config);
+    if (config.design === "stroop") return aggregateStroop(responses, config);
     return aggregateCrt(responses, config);
   },
 
@@ -538,6 +689,7 @@ const C = {
     if (config.design === "calibration") return presentCalibration(result, config, history, ctx);
     if (config.design === "lossaversion") return presentLoss(result, config, history, ctx);
     if (config.design === "bayes") return presentBayes(result, config, history, ctx);
+    if (config.design === "stroop") return presentStroop(result, config, history, ctx);
     return presentCrt(result, config, history, ctx);
   }
 };

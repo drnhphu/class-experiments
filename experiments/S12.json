@@ -1,0 +1,70 @@
+{
+  "id": "S12",
+  "engine": "C",
+  "priority": "P2",
+  "version": "1.0",
+  "concept": {
+    "vi": "Hiệu ứng Stroop: xử lý tự động và kiểm soát chú ý (đi kèm E12)",
+    "en": "Stroop effect: automatic processing and attentional control (companion to E12)"
+  },
+  "design": "stroop",
+  "intro": {
+    "vi": "Mỗi lượt hiện một chữ chỉ màu, in bằng một màu mực. Hãy bấm thật nhanh nút ghi MÀU MỰC của chữ, không phải chữ đó viết gì. Ví dụ chữ ĐỎ in bằng mực xanh thì bấm XANH. Có {n} lượt, mất khoảng một phút; hãy giữ màn hình mở đến khi xong.",
+    "en": "Each turn shows a colour word printed in some ink colour. Tap as fast as you can the button for the INK COLOUR, not what the word says. For example, the word RED printed in blue ink means tap BLUE. There are {n} turns, about one minute; keep the screen open until the end."
+  },
+  "colors": [
+    {
+      "id": "r",
+      "name": {
+        "vi": "ĐỎ",
+        "en": "RED"
+      },
+      "ink": "#dc2626"
+    },
+    {
+      "id": "b",
+      "name": {
+        "vi": "XANH",
+        "en": "BLUE"
+      },
+      "ink": "#2563eb"
+    },
+    {
+      "id": "y",
+      "name": {
+        "vi": "VÀNG",
+        "en": "YELLOW"
+      },
+      "ink": "#ca8a04"
+    },
+    {
+      "id": "p",
+      "name": {
+        "vi": "TÍM",
+        "en": "PURPLE"
+      },
+      "ink": "#7c3aed"
+    }
+  ],
+  "congruentPerColor": 3,
+  "incongruentPerPair": 1,
+  "gap": 400,
+  "rtMin": 200,
+  "rtMax": 3000,
+  "steps": [
+    {
+      "id": "trials",
+      "type": "stroop"
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Stroop (1935), thí nghiệm 2",
+      "en": "Stroop (1935), experiment 2"
+    },
+    "note": {
+      "vi": "Gọi tên màu mực của 100 chữ lệch màu mất 110,3 giây, so với 63,3 giây cho 100 ô màu, chậm thêm 47,0 giây (74,3%). Bài gốc đọc to cả trang và so với ô màu; bài này bấm từng lượt và so với chữ khớp màu, nên con số không so trực tiếp được",
+      "en": "Naming the ink of 100 conflicting colour words took 110.3 seconds against 63.3 seconds for 100 colour squares, 47.0 seconds (74.3%) longer. The original was read aloud card by card against plain squares; this task taps one item at a time against matching words, so the figures are not directly comparable"
+    }
+  }
+}

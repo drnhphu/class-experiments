@@ -60,6 +60,10 @@
   {
    "id": "E15",
    "file": "E15.json"
+  },
+  {
+   "id": "S12",
+   "file": "S12.json"
   }
  ],
  "defaultOrder": [
@@ -75,7 +79,8 @@
   "E02#p2",
   "E04",
   "E08",
-  "E12"
+  "E12",
+  "S12"
  ],
  "quizzesBase": "quizzes/",
  "quizzes": []
