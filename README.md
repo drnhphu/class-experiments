@@ -41,14 +41,18 @@ Quy ước khung lõi thêm vào giao diện:
 - `renderPresenter` nhận thêm `ctx` (`lang`, `t`, `round`), vì giao diện song ngữ.
 - `assign` của động cơ có `assign` khác `null` trả về đối tượng có `byUid: { uid: nhãn }` để CSV và kho so sánh ghi được điều kiện của từng người.
 
-## Thí nghiệm đã có (Giai đoạn 2 và 3)
+## Thí nghiệm đã có (Giai đoạn 2, 3 và 5)
 
 | Mã | Động cơ, thiết kế | Bước trong phiên thu | Khóa câu trả lời trong CSV |
 |---|---|---|---|
 | E01 | A, `pricelist` | `list` (12 dòng), `peter` | `row01` đến `row12` = `sure` hoặc `gamble`; `peter` = giá sẵn lòng trả |
 | E02 | A, `pair`, quy tắc `allais` | `p1`, `p2` đặt cách nhau | `p1`, `p2` = chỉ số phương án (0 hoặc 1) |
+| E03 | A, `pair`, quy tắc `ellsberg` | `p1` (cược màu thứ nhất), `p2` (cược màu thứ hai), hai màn liền nhau | `p1`, `p2` = 0 (hộp biết tỷ lệ) hoặc 1 (hộp chưa biết) |
+| E04 | A, `pair`, quy tắc `presentbias` | `p1` (hôm nay hay sau một tuần), `p2` (cùng cặp lùi xa ít nhất 26 tuần) | `p1`, `p2` = 0 (nhận sớm) hoặc 1 (chờ thêm) |
 | E05 | B, `anchor`, điều kiện `low` hoặc `high` | `cmp` (câu so sánh với mốc), `est` | `cmp` = `more` hoặc `less`; `est` = ước lượng; cột `assignment` = mốc đã nhận |
 | E06 | B, `framing`, điều kiện `gain` hoặc `loss` | `choice` | `choice` = 0 (phương án A, không rủi ro) hoặc 1; cột `assignment` = phiên bản đã đọc |
+| E07 | B, `decoy`, điều kiện `base` (hai phương án) hoặc `decoy` (thêm mồi) | `choice` | `choice` = `target`, `competitor` hoặc `decoy`; cột `assignment` = phiên bản đã thấy |
+| E08 | B, `default`, điều kiện `optin` (ô để trống) hoặc `optout` (ô đánh dấu sẵn) | `join` | `join` = 1 (tham gia) hoặc 0; cột `assignment` = phiên bản đã thấy |
 | E09 | C, `calibration` | `a` (câu 1 đến 5), `b` (câu 6 đến 10) | `q01_lo`, `q01_hi`, ... |
 | E10 | C, `lossaversion` | `gain` | `gain` = mức thắng tối thiểu; λ = `gain` / khoản thua |
 | E11 | C, `bayes` | `r1` (dạng phần trăm), `r2` (dạng tần suất) | `r1`, `r2` = chỉ số phương án |
@@ -63,6 +67,12 @@ Rời màn hình (tệp có `"noLookup": true`, hiện là E09, E11, E12): đi�
 Mở kết quả một thí nghiệm thì máy chủ không nhận thêm câu trả lời cho thí nghiệm đó (`revealed` trong tài liệu phiên).
 
 Trên màn chiếu, mọi số liệu hiện dạng tỷ lệ; biểu đồ phân bố gộp nhóm kề nhau đến khi mỗi cột có ít nhất 3 người.
+
+Giai đoạn 5 (thí nghiệm P2) chỉ thêm thiết kế mới vào động cơ, không đổi giao diện chung và không đổi các thiết kế đã qua cửa (quyết định của Kane ngày 18/11/2026). Quy tắc kiểm tra của các thiết kế mới:
+- `ellsberg`: hai hộp cùng số phiếu, số chẵn; hộp biết tỷ lệ chia đúng 50/50 và chữ mô tả nêu rõ số phiếu từng màu; hai câu cược hai màu khác nhau, cùng giải; hộp biết tỷ lệ là phương án thứ nhất ở cả hai câu.
+- `presentbias`: mỗi câu là khoản nhỏ nhận sớm so với khoản lớn nhận muộn; hai câu cùng hai số tiền và cùng khoảng chờ; câu một bắt đầu hôm nay, câu hai lùi xa ít nhất 26 tuần.
+- `decoy`: đúng hai thuộc tính bằng số, mỗi thuộc tính ghi rõ cao hơn hay thấp hơn là tốt; phương án mục tiêu và đối thủ đánh đổi nhau; mồi bị mục tiêu trội ở cả hai thuộc tính và không bị đối thủ trội; không dùng hình ảnh.
+- `default`: hai phiên bản dùng chung một đoạn mô tả và một nhãn ô, chỉ khác ô đánh dấu sẵn hay để trống; đổi lựa chọn tốn đúng một chạm ở cả hai.
 
 Mọi chữ học viên đọc nằm trong tệp cấu hình; sửa chữ hoặc số thì tăng `version`. Bộ 10 câu của E09 có nguồn kiểm chứng trong từng câu (`source`).
 

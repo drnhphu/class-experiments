@@ -1,0 +1,104 @@
+{
+  "id": "E03",
+  "engine": "A",
+  "priority": "P2",
+  "version": "1.0",
+  "concept": {
+    "vi": "Nghịch lý Ellsberg: tiện ích kỳ vọng chủ quan, né tránh sự mơ hồ",
+    "en": "Ellsberg paradox: subjective expected utility, ambiguity aversion"
+  },
+  "design": "pair",
+  "rule": "ellsberg",
+  "unit": {
+    "vi": "triệu đồng",
+    "en": "million VND"
+  },
+  "prize": 2,
+  "urn": {
+    "total": 100,
+    "colors": {
+      "c1": {
+        "vi": "xanh",
+        "en": "blue"
+      },
+      "c2": {
+        "vi": "vàng",
+        "en": "yellow"
+      }
+    },
+    "known": {
+      "c1": 50,
+      "c2": 50
+    },
+    "knownText": {
+      "vi": "{total} phiếu: đúng {k1} phiếu {c1} và {k2} phiếu {c2}",
+      "en": "{total} tickets: exactly {k1} {c1} and {k2} {c2}"
+    },
+    "unknownText": {
+      "vi": "{total} phiếu {c1} và {c2}, không ai biết mỗi màu bao nhiêu phiếu",
+      "en": "{total} {c1} and {c2} tickets, in a mix nobody knows"
+    }
+  },
+  "steps": [
+    {
+      "id": "p1",
+      "type": "choice",
+      "bet": "c1",
+      "prompt": {
+        "vi": "Có hai hộp phiếu, hộp K và hộp U. Bạn bốc ngẫu nhiên một phiếu từ hộp do bạn chọn. Nếu ra phiếu {color}, bạn nhận {x} {unit}; ra màu kia thì không nhận gì. Bạn bốc từ hộp nào?",
+        "en": "There are two boxes of tickets, box K and box U. You draw one ticket at random from the box you choose. If it is {color}, you get {x} {unit}; if not, you get nothing. Which box do you draw from?"
+      },
+      "options": [
+        {
+          "urn": "known",
+          "name": {
+            "vi": "Hộp K",
+            "en": "Box K"
+          }
+        },
+        {
+          "urn": "unknown",
+          "name": {
+            "vi": "Hộp U",
+            "en": "Box U"
+          }
+        }
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "choice",
+      "bet": "c2",
+      "prompt": {
+        "vi": "Vẫn hai hộp như trên, lần này cược màu kia. Nếu ra phiếu {color}, bạn nhận {x} {unit}; ra màu kia thì không nhận gì. Bạn bốc từ hộp nào?",
+        "en": "The same two boxes, now betting on the other colour. If it is {color}, you get {x} {unit}; if not, you get nothing. Which box do you draw from?"
+      },
+      "options": [
+        {
+          "urn": "known",
+          "name": {
+            "vi": "Hộp K",
+            "en": "Box K"
+          }
+        },
+        {
+          "urn": "unknown",
+          "name": {
+            "vi": "Hộp U",
+            "en": "Box U"
+          }
+        }
+      ]
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Ellsberg (1961), hai bình mỗi bình 100 bi đỏ và đen",
+      "en": "Ellsberg (1961), two urns of 100 red and black balls"
+    },
+    "note": {
+      "vi": "Bài gốc là thí nghiệm tư duy; Ellsberg mô tả việc chọn bình biết tỷ lệ cho cả hai màu là lựa chọn phổ biến và có cân nhắc, nhưng không công bố tỷ lệ",
+      "en": "The original was a thought experiment; Ellsberg described choosing the known urn for both colours as common and deliberate, but reported no shares"
+    }
+  }
+}

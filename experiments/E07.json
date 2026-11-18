@@ -1,0 +1,113 @@
+{
+  "id": "E07",
+  "engine": "B",
+  "priority": "P2",
+  "version": "1.0",
+  "concept": {
+    "vi": "Hiệu ứng chim mồi: lựa chọn phụ thuộc bối cảnh, phương án bị trội bất đối xứng",
+    "en": "Decoy effect: context-dependent choice, asymmetrically dominated alternative"
+  },
+  "design": "decoy",
+  "conditions": [
+    "base",
+    "decoy"
+  ],
+  "conditionNames": {
+    "base": {
+      "vi": "phiên bản hai gói",
+      "en": "two-plan version"
+    },
+    "decoy": {
+      "vi": "phiên bản ba gói",
+      "en": "three-plan version"
+    }
+  },
+  "story": {
+    "vi": "Công ty bạn cần chọn một gói dữ liệu di động cho nhân viên kinh doanh trong 12 tháng. Các gói chỉ khác nhau ở giá và dung lượng tốc độ cao; mọi điều kiện khác như nhau.",
+    "en": "Your company needs a mobile data plan for its sales staff for 12 months. The plans differ only in price and high-speed data; everything else is the same."
+  },
+  "attributes": [
+    {
+      "id": "price",
+      "name": {
+        "vi": "Giá",
+        "en": "Price"
+      },
+      "unit": {
+        "vi": "nghìn đồng/tháng",
+        "en": "thousand VND/month"
+      },
+      "better": "lower"
+    },
+    {
+      "id": "data",
+      "name": {
+        "vi": "Dung lượng",
+        "en": "Data"
+      },
+      "unit": {
+        "vi": "GB/tháng",
+        "en": "GB/month"
+      },
+      "better": "higher"
+    }
+  ],
+  "options": {
+    "target": {
+      "name": {
+        "vi": "Gói Sen",
+        "en": "Lotus plan"
+      },
+      "values": {
+        "price": 300,
+        "data": 20
+      }
+    },
+    "competitor": {
+      "name": {
+        "vi": "Gói Mai",
+        "en": "Apricot plan"
+      },
+      "values": {
+        "price": 200,
+        "data": 10
+      }
+    },
+    "decoy": {
+      "name": {
+        "vi": "Gói Đào",
+        "en": "Peach plan"
+      },
+      "values": {
+        "price": 330,
+        "data": 18
+      }
+    }
+  },
+  "order": [
+    "competitor",
+    "target",
+    "decoy"
+  ],
+  "steps": [
+    {
+      "id": "choice",
+      "type": "choice",
+      "prompt": {
+        "vi": "Bạn chọn gói nào?",
+        "en": "Which plan do you choose?"
+      }
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Huber, Payne và Puto (1982)",
+      "en": "Huber, Payne and Puto (1982)"
+    },
+    "note": {
+      "vi": "Trung bình qua sáu nhóm sản phẩm, thêm phương án mồi làm thị phần phương án mục tiêu tăng 9,2 điểm phần trăm; Frederick, Lee và Baskin (2014) cho thấy hiệu ứng khó tái lập khi phương án trình bày bằng hình ảnh, nên bài này dùng bảng số",
+      "en": "Averaged over six product classes, adding the decoy raised the target's share by 9.2 percentage points; Frederick, Lee and Baskin (2014) found the effect hard to reproduce with pictures, so this task uses a table of numbers"
+    },
+    "gap": 9.2
+  }
+}

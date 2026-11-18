@@ -1,0 +1,51 @@
+{
+  "id": "E08",
+  "engine": "B",
+  "priority": "P2",
+  "version": "1.0",
+  "concept": {
+    "vi": "Hiệu ứng mặc định: kiến trúc lựa chọn, cú hích",
+    "en": "Default effect: choice architecture, nudge"
+  },
+  "design": "default",
+  "conditions": [
+    "optin",
+    "optout"
+  ],
+  "conditionNames": {
+    "optin": {
+      "vi": "phiên bản ô để trống",
+      "en": "unticked version"
+    },
+    "optout": {
+      "vi": "phiên bản ô đánh dấu sẵn",
+      "en": "pre-ticked version"
+    }
+  },
+  "story": {
+    "vi": "Giả sử bạn vừa nhận việc ở một công ty. Công ty có chương trình tích lũy hưu trí tự nguyện: mỗi tháng trích 5% lương của bạn vào quỹ, công ty góp thêm 5%. Bạn có thể rút khỏi chương trình bất cứ lúc nào. Hãy đánh dấu hoặc bỏ đánh dấu ô dưới đây theo ý bạn, rồi xác nhận.",
+    "en": "Imagine you have just joined a company. It offers a voluntary retirement savings plan: 5% of your salary goes into the fund each month and the company adds another 5%. You can leave the plan at any time. Tick or untick the box below as you wish, then confirm."
+  },
+  "label": {
+    "vi": "Tôi tham gia chương trình tích lũy hưu trí",
+    "en": "I join the retirement savings plan"
+  },
+  "steps": [
+    {
+      "id": "join",
+      "type": "default"
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Johnson và Goldstein (2003), thí nghiệm trực tuyến, N = 161",
+      "en": "Johnson and Goldstein (2003), online experiment, N = 161"
+    },
+    "note": {
+      "vi": "Bài gốc hỏi về đăng ký hiến tạng; ở phiên bản không có ô chọn sẵn (buộc chọn có hoặc không), 79% đồng ý",
+      "en": "The original asked about registering as an organ donor; with no default (a forced yes or no), 79% agreed"
+    },
+    "optin": 42,
+    "optout": 82
+  }
+}

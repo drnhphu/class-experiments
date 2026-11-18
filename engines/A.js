@@ -1,7 +1,10 @@
 // Engine A: choices within subject, self-paced in the opening batch.
 // Designs: "pricelist" (E01: certainty equivalent from a multiple price list, plus a St. Petersburg
-// willingness to pay) and "pair" (E02: two binary choices placed apart in the batch, read as a 2x2 table).
-// Step types: "pricelist", "number", "choice". All wording students read comes from the config file.
+// willingness to pay) and "pair" (two binary choices read as a 2x2 table). Rules of "pair":
+// "allais" (E02, two problems placed apart in the batch), "ellsberg" (E03, a known and an unknown box,
+// betting on one colour then the other) and "presentbias" (E04, sooner or later, then the same pair
+// pushed into the future). Step types: "pricelist", "number", "choice".
+// All wording students read comes from the config file.
 import { el, pick } from "../js/i18n.js";
 import {
   median, pct, round, sum, addCounts, binCounts, formatNumber, fmtPct, fill,
@@ -71,10 +74,16 @@ export function pairKey(answers, steps) {
   return Number.isInteger(a) && Number.isInteger(b) ? `${a}${b}` : null;
 }
 
-// Cells that break the independence axiom for the Allais rule: sure option in problem 1 with the
-// long shot in problem 2 (classic pattern, "01"), or the reverse ("10").
-const VIOLATIONS = { allais: ["01", "10"] };
-const CLASSIC = { allais: "01" };
+// Cells that no single model of the rule explains, and the most common of them.
+// allais: sure option in problem 1 with the long shot in problem 2 ("01"), or the reverse ("10").
+// ellsberg (option 0 = known box): the known box for both colours ("00", ambiguity aversion) or the
+// unknown box for both ("11"); no belief about the unknown box gives either pair.
+// presentbias (option 0 = sooner): sooner today but later when both dates move away ("01"), or the
+// reverse ("10"); exponential discounting gives the same answer to both questions.
+const VIOLATIONS = { allais: ["01", "10"], ellsberg: ["00", "11"], presentbias: ["01", "10"] };
+const CLASSIC = { allais: "01", ellsberg: "00", presentbias: "01" };
+// Which option's share the projector shows for problem 1 and problem 2.
+const SHOWN = { allais: [0, 1], ellsberg: [0, 0], presentbias: [1, 1] };
 
 // Outcomes as a map x -> probability (percent); merges repeated amounts.
 function lottery(option) {
@@ -154,6 +163,56 @@ function validateAllais(config) {
   return errs;
 }
 
+// Shared shape of the two new rules: exactly two choice steps with two options each.
+function twoChoiceSteps(config, rule) {
+  const ch = ofType(config, "choice");
+  if (ch.length !== 2 || (config.steps || []).length !== 2) return [[`A/${rule}: cần đúng hai bước type "choice" (hai màn riêng)`], null];
+  const errs = [];
+  for (const s of ch) {
+    if (!bilingual(s.prompt)) errs.push(`A/${rule} ${s.id}: thiếu prompt`);
+    if (!Array.isArray(s.options) || s.options.length !== 2) errs.push(`A/${rule} ${s.id}: cần đúng hai phương án`);
+    else s.options.forEach((o, i) => { if (!bilingual(o?.name)) errs.push(`A/${rule} ${s.id}: phương án ${i + 1} thiếu name`); });
+  }
+  return [errs, ch];
+}
+const hasKeys = (o, ...keys) => bilingual(o) && keys.every((k) => o.vi.includes(`{${k}}`) && o.en.includes(`{${k}}`));
+
+function validateEllsberg(config) {
+  const [errs, ch] = twoChoiceSteps(config, "ellsberg");
+  if (!ch || errs.length) return errs;
+  const u = config.urn || {};
+  const colors = Object.keys(u.colors || {});
+  if (colors.length !== 2 || !colors.every((c) => bilingual(u.colors[c]))) return ["A/ellsberg: urn.colors cần đúng hai màu, mỗi màu có tên Việt và Anh"];
+  if (!Number.isInteger(u.total) || u.total < 2 || u.total % 2) errs.push("A/ellsberg: urn.total (số phiếu mỗi hộp) phải là số nguyên chẵn từ 2 trở lên");
+  const k = colors.map((c) => u.known?.[c]);
+  if (!k.every(Number.isInteger) || k[0] !== k[1] || k[0] + k[1] !== u.total) errs.push("A/ellsberg: hộp biết tỷ lệ phải chia đúng 50/50 giữa hai màu, cộng lại bằng urn.total (urn.known)");
+  if (!hasKeys(u.knownText, "k1", "k2")) errs.push("A/ellsberg: urn.knownText phải nêu rõ số phiếu từng màu ({k1}, {k2}) ở cả hai ngôn ngữ");
+  if (!hasKeys(u.unknownText, "total")) errs.push("A/ellsberg: urn.unknownText phải nêu cùng tổng số phiếu ({total}) ở cả hai ngôn ngữ");
+  if (!isNum(config.prize) || config.prize <= 0) errs.push("A/ellsberg: prize (giải khi bốc trúng màu đã cược) phải là số dương, dùng chung cho hai câu");
+  const bets = ch.map((s) => s.bet);
+  if (!bets.every((b) => colors.includes(b)) || bets[0] === bets[1]) errs.push("A/ellsberg: hai câu phải cược hai màu khác nhau (steps[].bet là một trong urn.colors)");
+  const urns = ch.map((s) => s.options.map((o) => o.urn).join(","));
+  if (!urns.every((x) => x === "known,unknown" || x === "unknown,known")) errs.push("A/ellsberg: mỗi câu cần một phương án hộp biết tỷ lệ (urn \"known\") và một phương án hộp chưa biết (urn \"unknown\")");
+  else if (urns[0] !== "known,unknown" || urns[1] !== "known,unknown") errs.push("A/ellsberg: hộp biết tỷ lệ phải là phương án thứ nhất ở cả hai câu (cùng thứ tự, để bảng chéo đọc đúng)");
+  ch.forEach((s) => { if (!hasKeys(s.prompt, "color", "x")) errs.push(`A/ellsberg ${s.id}: prompt phải nêu màu cược và giải ({color}, {x}) ở cả hai ngôn ngữ`); });
+  return errs;
+}
+
+function validatePresentBias(config) {
+  const [errs, ch] = twoChoiceSteps(config, "presentbias");
+  if (!ch || errs.length) return errs;
+  const opts = ch.map((s) => s.options);
+  if (!opts.flat().every((o) => isNum(o.x) && o.x > 0 && Number.isInteger(o.weeks) && o.weeks >= 0)) return ["A/presentbias: mỗi phương án cần số tiền x > 0 và số tuần chờ weeks là số nguyên không âm"];
+  opts.forEach((o, i) => { if (!(o[0].weeks < o[1].weeks && o[0].x < o[1].x)) errs.push(`A/presentbias ${ch[i].id}: phương án thứ nhất phải là khoản nhỏ hơn nhận sớm hơn, phương án thứ hai là khoản lớn hơn nhận muộn hơn`); });
+  if (errs.length) return errs;
+  if (opts[0][0].x !== opts[1][0].x || opts[0][1].x !== opts[1][1].x) errs.push("A/presentbias: hai câu phải dùng cùng hai số tiền");
+  if (opts[0][1].weeks - opts[0][0].weeks !== opts[1][1].weeks - opts[1][0].weeks) errs.push("A/presentbias: hai câu phải có cùng khoảng chờ giữa hai phương án");
+  if (opts[0][0].weeks !== 0) errs.push("A/presentbias: câu thứ nhất phải bắt đầu hôm nay (weeks = 0 cho phương án sớm)");
+  if (opts[1][0].weeks < 26) errs.push("A/presentbias: câu thứ hai phải lùi cả cặp xa ít nhất 26 tuần (6 tháng)");
+  if (!hasKeys(config.text?.today, "x", "unit") || !hasKeys(config.text?.later, "x", "unit", "w")) errs.push("A/presentbias: cần text.today chứa {x}, {unit} và text.later chứa {x}, {unit}, {w}");
+  return errs;
+}
+
 // ---------- phone screens ----------
 const box = (...c) => el("div", { class: "space-y-3" }, ...c);
 const primaryBtn = (label, onclick, disabled = false) =>
@@ -161,9 +220,27 @@ const primaryBtn = (label, onclick, disabled = false) =>
 
 function outcomeText(option, config, lang) {
   const unit = pick(config.unit, lang);
+  if (config.rule === "ellsberg") return urnText(option.urn, config, lang);
+  if (config.rule === "presentbias") {
+    const x = formatNumber(option.x, lang);
+    return option.weeks === 0 ? fill(pick(config.text.today, lang), { x, unit }, lang) : fill(pick(config.text.later, lang), { x, unit, w: option.weeks }, lang);
+  }
   const outs = option.outcomes || [];
   if (outs.length === 1 && outs[0].p === 100) return fill(pick(config.text.sure, lang), { x: outs[0].x, unit }, lang);
   return outs.map((o) => fill(pick(o.x === 0 ? config.text.zero : config.text.outcome, lang), { p: o.p, x: o.x, unit }, lang)).join("; ");
+}
+
+// Ellsberg: what is in each box (the bet itself is in the step's prompt).
+function urnText(kind, config, lang) {
+  const u = config.urn, [c1, c2] = Object.keys(u.colors);
+  const params = { total: u.total, k1: u.known[c1], k2: u.known[c2], c1: pick(u.colors[c1], lang), c2: pick(u.colors[c2], lang) };
+  return fill(pick(kind === "known" ? u.knownText : u.unknownText, lang), params, lang);
+}
+
+// Step prompt with the rule's numbers filled in (Ellsberg: colour bet on and prize).
+function promptText(s, config, lang) {
+  if (config.rule !== "ellsberg") return pick(s.prompt, lang);
+  return fill(pick(s.prompt, lang), { color: pick(config.urn.colors[s.bet], lang), x: formatNumber(config.prize, lang), unit: pick(config.unit, lang) }, lang);
 }
 
 function renderPricelist(s, config, ctx) {
@@ -228,7 +305,7 @@ function renderChoice(s, config, ctx) {
       go.disabled = false;
     }
   }, el("span", { class: "block font-medium" }, pick(o.name, lang)), el("span", { class: "block text-sm" }, outcomeText(o, config, lang))));
-  return box(el("p", { class: "whitespace-pre-line" }, pick(s.prompt, lang)), el("div", { class: "grid gap-2" }, opts), go);
+  return box(el("p", { class: "whitespace-pre-line" }, promptText(s, config, lang)), el("div", { class: "grid gap-2" }, opts), go);
 }
 
 function renderPersonal(config, ctx) {
@@ -248,7 +325,7 @@ function renderPersonal(config, ctx) {
       const s = ofType(config, "choice").find((x) => x.id === c.step), o = c.index == null ? null : s.options[c.index];
       lines.push(o ? t("a.youChose", { step: c.label, name: pick(o.name, lang), text: outcomeText(o, config, lang) }) : t("a.youSkipped", { step: c.label }));
     }
-    if (sc.key) lines.push(t(sc.violation ? "a.youViolate" : "a.youConsistent"));
+    if (sc.key) lines.push(config.rule === "allais" ? t(sc.violation ? "a.youViolate" : "a.youConsistent") : t(`a.${config.rule}.k${sc.key}`));
   }
   return el("div", { class: "space-y-3" }, el("h2", { class: "text-lg font-semibold" }, t("eng.yourResult")),
     ...lines.map((x) => el("p", {}, x)));
@@ -313,15 +390,17 @@ function presentPair(result, config, history, ctx) {
   const bench = config.benchmark || {};
   const viol = VIOLATIONS[config.rule] || [];
   const classic = CLASSIC[config.rule];
+  const [o1, o2] = SHOWN[config.rule] || [0, 1];
+  const key = (k) => (config.rule === "allais" ? `a.${k}` : `a.${config.rule}.${k}`); // allais keeps its original wording
   const name = (si, oi) => pick(steps[si].options[oi].name, lang);
   const share = (c, i) => fmtPct(pct(c[i], sum(c)), lang);
   const cellPct = (cross, n, k) => fmtPct(pct(cross[k] || 0, n), lang);
   const violPct = (cross, n) => fmtPct(pct(sum(viol.map((k) => cross[k] || 0)), n), lang);
   const rows = [
-    { label: t("a.pickIn", { step: 1, name: name(0, 0) }), mine: share(result.c1, 0), earlier: has ? share(e.c1, 0) : null, original: isNum(bench.percents?.[steps[0].id]?.[0]) ? `${bench.percents[steps[0].id][0]}%` : null },
-    { label: t("a.pickIn", { step: 2, name: name(1, 1) }), mine: share(result.c2, 1), earlier: has ? share(e.c2, 1) : null, original: isNum(bench.percents?.[steps[1].id]?.[1]) ? `${bench.percents[steps[1].id][1]}%` : null },
-    { label: t("a.classicPattern", { a: name(0, 0), b: name(1, 1) }), mine: cellPct(result.cross, result.nBoth, classic), earlier: e.nBoth ? cellPct(e.cross, e.nBoth, classic) : null, original: isNum(bench.cross?.[classic]) ? `${bench.cross[classic]}%` : null },
-    { label: t("a.anyViolation"), mine: violPct(result.cross, result.nBoth), earlier: e.nBoth ? violPct(e.cross, e.nBoth) : null, original: null }
+    { label: t("a.pickIn", { step: 1, name: name(0, o1) }), mine: share(result.c1, o1), earlier: has ? share(e.c1, o1) : null, original: isNum(bench.percents?.[steps[0].id]?.[o1]) ? `${bench.percents[steps[0].id][o1]}%` : null },
+    { label: t("a.pickIn", { step: 2, name: name(1, o2) }), mine: share(result.c2, o2), earlier: has ? share(e.c2, o2) : null, original: isNum(bench.percents?.[steps[1].id]?.[o2]) ? `${bench.percents[steps[1].id][o2]}%` : null },
+    { label: t(key("classicPattern"), { a: name(0, +classic[0]), b: name(1, +classic[1]) }), mine: cellPct(result.cross, result.nBoth, classic), earlier: e.nBoth ? cellPct(e.cross, e.nBoth, classic) : null, original: isNum(bench.cross?.[classic]) ? `${bench.cross[classic]}%` : null },
+    { label: t(key("anyViolation")), mine: violPct(result.cross, result.nBoth), earlier: e.nBoth ? violPct(e.cross, e.nBoth) : null, original: null }
   ];
   // 2x2 table of this class, as percentages only (small cells are never shown as counts).
   const cell = (k) => el("td", { class: `border border-slate-300 p-4 text-center text-3xl ${k === classic ? "bg-rose-200 font-bold" : viol.includes(k) ? "bg-rose-50" : ""}` },
@@ -333,7 +412,7 @@ function presentPair(result, config, history, ctx) {
       el("tr", {}, el("th", { class: "p-2 text-left font-normal" }, `${t("a.problem", { n: 1 })}: ${name(0, 1)}`), cell("10"), cell("11"))));
   return el("div", { class: "space-y-6" },
     el("div", { class: "flex flex-wrap items-start gap-10" }, grid,
-      el("p", { class: "max-w-md text-xl text-slate-600" }, t("a.crossNote", { n: result.nBoth }))),
+      el("p", { class: "max-w-md text-xl text-slate-600" }, t(key("crossNote"), { n: result.nBoth }))),
     threeColumns(rows, ctx, { mine: result.n1, earlier: sum(e.c1) }),
     benchmarkLine(bench, lang));
 }
@@ -348,7 +427,9 @@ const A = {
     if (config.design === "pair") {
       if (!bilingual(config.unit)) return ["A/pair: thiếu unit"];
       if (config.rule === "allais") return validateAllais(config);
-      return [`A/pair: rule "${config.rule}" chưa được hỗ trợ`];
+      if (config.rule === "ellsberg") return validateEllsberg(config);
+      if (config.rule === "presentbias") return validatePresentBias(config);
+      return [`A/pair: rule "${config.rule}" chưa được hỗ trợ (allais, ellsberg hoặc presentbias)`];
     }
     return [`A: design "${config.design}" không hợp lệ (pricelist hoặc pair)`];
   },

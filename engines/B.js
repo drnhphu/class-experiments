@@ -1,8 +1,10 @@
 // Engine B: between-subject conditions. Each person sees one version; the instructor's page splits
 // the class into equal groups (js/assign.js). The condition each person got is read from the
 // assignment document (CSV column "assignment"), never from the phone.
-// Designs: "anchor" (E05: comparison question with a low or high anchor, then an estimate) and
-// "framing" (E06: the same two options described as gains or as losses).
+// Designs: "anchor" (E05: comparison question with a low or high anchor, then an estimate),
+// "framing" (E06: the same two options described as gains or as losses), "decoy" (E07: two options,
+// or the same two plus an option the target beats on every attribute) and "default" (E08: the same
+// yes/no decision with the box ticked or unticked at the start).
 // All wording students read comes from the config file.
 import { el, pick } from "../js/i18n.js";
 import { balancedAssign } from "../js/assign.js";
@@ -87,6 +89,57 @@ function validateFraming(config) {
   return errs;
 }
 
+const IMAGE_KEY = /^(image|images|img|picture|photo)$/i;
+const IMAGE_TEXT = /<img|\.(png|jpe?g|gif|svg|webp)\b/i;
+// True if any key or string anywhere in the config points to a picture.
+function usesImages(node) {
+  if (typeof node === "string") return IMAGE_TEXT.test(node);
+  if (Array.isArray(node)) return node.some(usesImages);
+  if (node && typeof node === "object") return Object.entries(node).some(([k, v]) => IMAGE_KEY.test(k) || usesImages(v));
+  return false;
+}
+// Better on attribute a: higher or lower value, as the attribute says.
+const better = (a, x, y) => (a.better === "lower" ? x < y : x > y);
+const OPTION_KEYS = ["target", "competitor", "decoy"];
+
+function validateDecoy(config) {
+  const errs = validateCommon(config);
+  if (errs.length) return errs;
+  if ([...config.conditions].sort().join() !== "base,decoy") errs.push("B/decoy: conditions phải là base (không có mồi) và decoy (có mồi)");
+  const st = config.steps || [];
+  if (st.length !== 1 || st[0]?.type !== "choice" || !bilingual(st[0]?.prompt)) errs.push("B/decoy: cần đúng một bước type \"choice\" có prompt");
+  if (!bilingual(config.story)) errs.push("B/decoy: thiếu story (phần mô tả chung của hai phiên bản)");
+  const at = config.attributes;
+  if (!Array.isArray(at) || at.length !== 2 || new Set(at.map((a) => a?.id)).size !== 2 || at.some((a) => !a?.id || !bilingual(a.name) || !bilingual(a.unit) || !["higher", "lower"].includes(a.better))) {
+    return [...errs, "B/decoy: cần đúng hai thuộc tính bằng số (attributes), mỗi thuộc tính có id, name, unit và better là \"higher\" hoặc \"lower\""];
+  }
+  const o = config.options || {};
+  if (!OPTION_KEYS.every((k) => bilingual(o[k]?.name) && at.every((a) => isNum(o[k]?.values?.[a.id])))) {
+    return [...errs, "B/decoy: options cần target, competitor và decoy, mỗi phương án có name và một số cho mỗi thuộc tính"];
+  }
+  const v = (k, a) => o[k].values[a.id];
+  const tBetter = at.filter((a) => better(a, v("target", a), v("competitor", a))).length;
+  const cBetter = at.filter((a) => better(a, v("competitor", a), v("target", a))).length;
+  if (tBetter !== 1 || cBetter !== 1) errs.push("B/decoy: target và competitor phải đánh đổi: mỗi phương án hơn phương án kia ở đúng một thuộc tính");
+  if (!at.every((a) => better(a, v("target", a), v("decoy", a)))) errs.push("B/decoy: mồi phải bị target trội ở cả hai thuộc tính");
+  if (!at.some((a) => better(a, v("decoy", a), v("competitor", a)))) errs.push("B/decoy: mồi không được bị competitor trội (mồi phải hơn competitor ở ít nhất một thuộc tính)");
+  const ord = config.order;
+  if (!Array.isArray(ord) || ord.length !== 3 || [...ord].sort().join() !== [...OPTION_KEYS].sort().join()) errs.push("B/decoy: order phải liệt kê đủ target, competitor, decoy, mỗi phương án một lần (thứ tự hiện)");
+  if (usesImages(config)) errs.push("B/decoy: phương án phải trình bày bằng bảng số, không dùng hình ảnh");
+  return errs;
+}
+
+function validateDefault(config) {
+  const errs = validateCommon(config);
+  if (errs.length) return errs;
+  if ([...config.conditions].sort().join() !== "optin,optout") errs.push("B/default: conditions phải là optin (ô để trống) và optout (ô đánh dấu sẵn)");
+  const st = config.steps || [];
+  if (st.length !== 1 || st[0]?.type !== "default") errs.push("B/default: cần đúng một bước type \"default\"");
+  if (!bilingual(config.story) || !bilingual(config.label)) errs.push("B/default: cần một story và một label dùng chung cho hai phiên bản (hai phiên bản chỉ khác ô chọn sẵn)");
+  if (config.frames || config.versions || config.labels) errs.push("B/default: không được có chữ riêng cho từng phiên bản (frames, versions, labels); hai phiên bản chỉ khác ô chọn sẵn");
+  return errs;
+}
+
 // ---------- phone screens ----------
 const primaryBtn = (label, onclick, disabled = false) =>
   el("button", { class: "w-full rounded-lg bg-slate-900 py-3 font-medium text-white disabled:opacity-40", disabled, onclick }, label);
@@ -134,6 +187,43 @@ function renderFramingStep(s, config, ctx) {
   return choiceScreen(pick(config.story, ctx.lang), texts, [0, 1], s.id, ctx);
 }
 
+// Options in display order: the base version leaves the decoy out and keeps the others' order.
+const shownOptions = (config, cond) => config.order.filter((k) => cond === "decoy" || k !== "decoy");
+const valueText = (config, key, a, lang) => `${formatNumber(config.options[key].values[a.id], lang)} ${pick(a.unit, lang)}`;
+
+function renderDecoyStep(s, config, ctx) {
+  const { lang, t } = ctx;
+  const elapsed = elapsedClock(ctx);
+  const keys = shownOptions(config, ctx.assignment);
+  let chosen = null;
+  const go = primaryBtn(t("eng.confirm"), () => { if (chosen != null) ctx.submit({ [s.id]: chosen }, { [s.id]: elapsed() }); }, true);
+  const GRID = "grid grid-cols-[1fr_6.5rem_6.5rem] items-center gap-2";
+  const head = el("div", { class: `${GRID} px-4 text-xs text-slate-500` }, el("span", {}, ""),
+    ...config.attributes.map((a) => el("span", { class: "text-right" }, `${pick(a.name, lang)} (${pick(a.unit, lang)})`)));
+  const rows = keys.map((k) => el("button", { class: `${OPT} ${GRID}`, onclick: (ev) => {
+    chosen = k;
+    for (const b of ev.currentTarget.parentNode.children) b.className = `${OPT} ${GRID}`;
+    ev.currentTarget.className = `${OPT_ON} ${GRID}`;
+    go.disabled = false;
+  } }, el("span", { class: "font-medium" }, pick(config.options[k].name, lang)),
+    ...config.attributes.map((a) => el("span", { class: "text-right tabular-nums" }, formatNumber(config.options[k].values[a.id], lang)))));
+  return el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, pick(config.story, lang)),
+    el("p", { class: "whitespace-pre-line" }, pick(s.prompt, lang)), head, el("div", { class: "grid gap-2" }, rows), go);
+}
+
+// One tap ticks or unticks the box in both versions; only the starting state differs.
+function renderDefaultStep(s, config, ctx) {
+  const { lang, t } = ctx;
+  const elapsed = elapsedClock(ctx);
+  let on = ctx.assignment === "optout";
+  const mark = el("span", { class: "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 border-slate-900 text-lg" }, on ? "✓" : "");
+  const box = el("button", { class: "flex w-full items-center gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-left", role: "checkbox", "aria-checked": String(on),
+    onclick: () => { on = !on; mark.textContent = on ? "✓" : ""; box.setAttribute("aria-checked", String(on)); } },
+    mark, el("span", {}, pick(config.label, lang)));
+  const go = primaryBtn(t("eng.confirm"), () => ctx.submit({ [s.id]: on ? 1 : 0 }, { [s.id]: elapsed() }));
+  return el("div", { class: "space-y-3" }, el("p", { class: "whitespace-pre-line" }, pick(config.story, lang)), box, go);
+}
+
 function renderPersonal(config, ctx) {
   const { lang, t } = ctx;
   const cond = ctx.assignment, other = config.conditions.find((c) => c !== cond);
@@ -148,6 +238,19 @@ function renderPersonal(config, ctx) {
     const v = ctx.myAnswers?.[est.id];
     lines.push(isNum(v) ? t("b.youEstimate", { v: formatNumber(v, lang), unit }) : t("a.noAnswer"));
     lines.push(t("b.truth", { v: formatNumber(config.truth, lang), unit, src: config.source.label }));
+  } else if (config.design === "decoy") {
+    const v = ctx.myAnswers?.[config.steps[0].id];
+    const list = (c) => shownOptions(config, c).map((k) => `• ${pick(config.options[k].name, lang)}: ${config.attributes.map((a) => valueText(config, k, a, lang)).join(", ")}`);
+    lines.push(t("b.youRead", { g: name(cond) }));
+    lines.push(...list(cond));
+    lines.push(config.options[v] ? t("b.youPicked", { a: pick(config.options[v].name, lang) }) : t("a.noAnswer"));
+    lines.push(t(cond === "decoy" ? "b.decoy.youHadDecoy" : "b.decoy.youNoDecoy", { d: pick(config.options.decoy.name, lang), tg: pick(config.options.target.name, lang) }));
+  } else if (config.design === "default") {
+    const v = ctx.myAnswers?.[config.steps[0].id];
+    lines.push(t("b.default.youSaw", { g: name(cond) }));
+    lines.push(v === 1 || v === 0 ? t(v === 1 ? "b.default.youIn" : "b.default.youOut", { l: pick(config.label, lang) }) : t("a.noAnswer"));
+    lines.push(t((v === 1) === (cond === "optout") ? "b.default.kept" : "b.default.changed"));
+    lines.push(t("b.default.other", { g: name(other) }));
   } else {
     const mine = framingTexts(config, cond, lang), theirs = framingTexts(config, other, lang);
     const v = ctx.myAnswers?.[config.steps[0].id];
@@ -184,6 +287,31 @@ function aggregateFraming(responses, config) {
     for (const r of groups[c]) { const v = r.answers?.[key]; if (v === 0 || v === 1) cnt[v]++; }
     out.counts[c] = cnt;
     out.n[c] = sum(cnt);
+  }
+  return out;
+}
+
+function aggregateDecoy(responses, config) {
+  const key = config.steps[0].id;
+  const groups = byCondition(responses, config);
+  const out = { design: "decoy", conditions: config.conditions, counts: {}, n: {} };
+  for (const c of config.conditions) {
+    const cnt = Object.fromEntries(OPTION_KEYS.map((k) => [k, 0]));
+    for (const r of groups[c]) { const v = r.answers?.[key]; if (v in cnt && (c === "decoy" || v !== "decoy")) cnt[v]++; }
+    out.counts[c] = cnt;
+    out.n[c] = sum(Object.values(cnt));
+  }
+  return out;
+}
+
+function aggregateDefault(responses, config) {
+  const key = config.steps[0].id;
+  const groups = byCondition(responses, config);
+  const out = { design: "default", conditions: config.conditions, joined: {}, n: {} };
+  for (const c of config.conditions) {
+    const vals = groups[c].map((r) => r.answers?.[key]).filter((v) => v === 0 || v === 1);
+    out.joined[c] = vals.filter((v) => v === 1).length;
+    out.n[c] = vals.length;
   }
   return out;
 }
@@ -257,15 +385,79 @@ function presentFraming(result, config, history, ctx) {
     benchmarkLine(bench, lang));
 }
 
+function presentDecoy(result, config, history, ctx) {
+  const { lang, t } = ctx;
+  const conds = ["base", "decoy"];
+  const earlier = (history || []).filter((h) => h?.design === "decoy" && conds.every((c) => h.counts?.[c]));
+  const eCounts = Object.fromEntries(conds.map((c) => [c, Object.fromEntries(OPTION_KEYS.map((k) => [k, sum(earlier.map((h) => h.counts[c][k] || 0))]))]));
+  const share = (cnt, k) => pct(cnt[k], sum(Object.values(cnt)));
+  const hasPrev = conds.some((c) => sum(Object.values(eCounts[c])));
+  const name = (c) => pick(config.conditionNames[c], lang);
+  const tg = pick(config.options.target.name, lang), dn = pick(config.options.decoy.name, lang);
+  const bench = config.benchmark || {};
+  const gap = (cs) => { const a = share(cs.decoy, "target"), b = share(cs.base, "target"); return a == null || b == null ? null : a - b; };
+  const pts = (x) => (x == null ? "—" : t("b.points", { d: `${x > 0 ? "+" : ""}${formatNumber(round(x, 1), lang)}` }));
+  const datasets = [{ label: t("present.thisClass"), data: conds.map((c) => round(share(result.counts[c], "target"), 0) ?? 0) }];
+  if (hasPrev) datasets.push({ label: t("present.earlier"), data: conds.map((c) => round(share(eCounts[c], "target"), 0) ?? 0) });
+  const rows = [
+    ...conds.map((c) => ({ label: t("b.decoy.targetIn", { tg, g: name(c) }), mine: fmtPct(share(result.counts[c], "target"), lang), earlier: hasPrev ? fmtPct(share(eCounts[c], "target"), lang) : null, original: null })),
+    { label: t("b.decoy.gap"), mine: pts(gap(result.counts)), earlier: hasPrev ? pts(gap(eCounts)) : null, original: isNum(bench.gap) ? pts(bench.gap) : null },
+    { label: t("b.decoy.decoyPicked", { d: dn }), mine: fmtPct(share(result.counts.decoy, "decoy"), lang), earlier: hasPrev ? fmtPct(share(eCounts.decoy, "decoy"), lang) : null, original: null }
+  ];
+  const table = el("table", { class: "text-xl" },
+    el("thead", {}, el("tr", {}, el("th", {}, ""), ...config.attributes.map((a) => el("th", { class: "p-2 text-right font-normal" }, `${pick(a.name, lang)} (${pick(a.unit, lang)})`)))),
+    el("tbody", {}, ...config.order.map((k) => el("tr", { class: k === "decoy" ? "text-slate-500" : "" },
+      el("th", { class: "p-2 text-left font-normal" }, `${pick(config.options[k].name, lang)}${k === "decoy" ? ` (${t("b.decoy.onlyIn")})` : ""}`),
+      ...config.attributes.map((a) => el("td", { class: "p-2 text-right tabular-nums" }, formatNumber(config.options[k].values[a.id], lang)))))));
+  return el("div", { class: "space-y-6" },
+    heading(t("b.decoy.title", { tg })),
+    el("div", { class: "flex flex-wrap items-start gap-10" }, table,
+      el("div", { class: "min-w-[20rem] flex-1" }, barChart(conds.map((c) => `${cap(name(c))} (n=${result.n[c]})`), datasets, { height: 260 }))),
+    threeColumns(rows, ctx, { mine: sum(conds.map((c) => result.n[c])), earlier: sum(conds.map((c) => sum(Object.values(eCounts[c])))) }),
+    benchmarkLine(bench, lang));
+}
+
+function presentDefault(result, config, history, ctx) {
+  const { lang, t } = ctx;
+  const conds = ["optin", "optout"];
+  const earlier = (history || []).filter((h) => h?.design === "default" && conds.every((c) => isNum(h.n?.[c])));
+  const e = { joined: Object.fromEntries(conds.map((c) => [c, sum(earlier.map((h) => h.joined[c] || 0))])), n: Object.fromEntries(conds.map((c) => [c, sum(earlier.map((h) => h.n[c] || 0))])) };
+  const rate = (r, c) => pct(r.joined[c], r.n[c]);
+  const hasPrev = conds.some((c) => e.n[c]);
+  const name = (c) => pick(config.conditionNames[c], lang);
+  const bench = config.benchmark || {};
+  const gap = (r) => { const a = rate(r, "optout"), b = rate(r, "optin"); return a == null || b == null ? null : a - b; };
+  const pts = (x) => (x == null ? "—" : t("b.points", { d: formatNumber(round(x, 0), lang) }));
+  const datasets = [{ label: t("present.thisClass"), data: conds.map((c) => round(rate(result, c), 0) ?? 0) }];
+  if (hasPrev) datasets.push({ label: t("present.earlier"), data: conds.map((c) => round(rate(e, c), 0) ?? 0) });
+  if (isNum(bench.optin) && isNum(bench.optout)) datasets.push({ label: t("present.original"), data: [bench.optin, bench.optout] });
+  const rows = [
+    ...conds.map((c) => ({ label: t("b.default.joinIn", { g: name(c) }), mine: fmtPct(rate(result, c), lang), earlier: hasPrev ? fmtPct(rate(e, c), lang) : null, original: isNum(bench[c]) ? `${bench[c]}%` : null })),
+    { label: t("b.default.gap"), mine: pts(gap(result)), earlier: hasPrev ? pts(gap(e)) : null, original: isNum(bench.optin) && isNum(bench.optout) ? pts(bench.optout - bench.optin) : null }
+  ];
+  return el("div", { class: "space-y-6" },
+    heading(t("b.default.title", { l: pick(config.label, lang) })),
+    barChart(conds.map((c) => `${cap(name(c))} (n=${result.n[c]})`), datasets, { height: 300 }),
+    el("p", { class: "text-lg text-slate-600" }, t("b.default.note")),
+    threeColumns(rows, ctx, { mine: sum(conds.map((c) => result.n[c])), earlier: sum(conds.map((c) => e.n[c])) }),
+    benchmarkLine(bench, lang));
+}
+
+const DESIGNS = {
+  anchor: { validate: validateAnchor, render: renderAnchorStep, aggregate: aggregateAnchor, present: presentAnchor },
+  framing: { validate: validateFraming, render: renderFramingStep, aggregate: aggregateFraming, present: presentFraming },
+  decoy: { validate: validateDecoy, render: renderDecoyStep, aggregate: aggregateDecoy, present: presentDecoy },
+  default: { validate: validateDefault, render: renderDefaultStep, aggregate: aggregateDefault, present: presentDefault }
+};
+
 // ---------- engine ----------
 const B = {
   id: "B",
   mode: "collect",
 
   validate(config) {
-    if (config.design === "anchor") return validateAnchor(config);
-    if (config.design === "framing") return validateFraming(config);
-    return [`B: design "${config.design}" không hợp lệ (anchor hoặc framing)`];
+    const d = Object.hasOwn(DESIGNS, config.design) ? DESIGNS[config.design] : null;
+    return d ? d.validate(config) : [`B: design "${config.design}" không hợp lệ (anchor, framing, decoy hoặc default)`];
   },
 
   // Everyone present when the batch opens; people who join later are added by the instructor's page
@@ -278,7 +470,7 @@ const B = {
     if (step === "__result") return renderPersonal(config, ctx);
     const s = (config.steps || []).find((x) => x.id === step);
     if (!s || !config.conditions.includes(ctx.assignment)) return el("p", {}, ctx.t("collect.waitGroup"));
-    return config.design === "anchor" ? renderAnchorStep(s, config, ctx) : renderFramingStep(s, config, ctx);
+    return DESIGNS[config.design].render(s, config, ctx);
   },
 
   // The phone shows which version it got (plan); the condition itself comes from ctx.assignment.
@@ -287,12 +479,12 @@ const B = {
   },
 
   aggregate(responses, config) {
-    return config.design === "anchor" ? aggregateAnchor(responses, config) : aggregateFraming(responses, config);
+    return DESIGNS[config.design].aggregate(responses, config);
   },
 
   renderPresenter(result, config, history, ctx) {
     ctx = { lang: "vi", t: (k) => k, ...ctx };
-    return config.design === "anchor" ? presentAnchor(result, config, history, ctx) : presentFraming(result, config, history, ctx);
+    return DESIGNS[config.design].present(result, config, history, ctx);
   }
 };
 

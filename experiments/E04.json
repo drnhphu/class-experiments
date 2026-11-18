@@ -1,0 +1,90 @@
+{
+  "id": "E04",
+  "engine": "A",
+  "priority": "P2",
+  "version": "1.0",
+  "concept": {
+    "vi": "Thiên lệch hiện tại: chiết khấu hyperbol, bất nhất theo thời gian",
+    "en": "Present bias: hyperbolic discounting, time inconsistency"
+  },
+  "design": "pair",
+  "rule": "presentbias",
+  "unit": {
+    "vi": "nghìn đồng",
+    "en": "thousand VND"
+  },
+  "text": {
+    "today": {
+      "vi": "Nhận {x} {unit} hôm nay",
+      "en": "{x} {unit} today"
+    },
+    "later": {
+      "vi": "Nhận {x} {unit} sau {w} tuần",
+      "en": "{x} {unit} in {w} weeks"
+    }
+  },
+  "steps": [
+    {
+      "id": "p1",
+      "type": "choice",
+      "prompt": {
+        "vi": "Bạn được chọn một trong hai khoản tiền dưới đây. Bạn chọn khoản nào?",
+        "en": "You may pick one of the two payments below. Which do you choose?"
+      },
+      "options": [
+        {
+          "name": {
+            "vi": "Nhận sớm",
+            "en": "Sooner"
+          },
+          "x": 500,
+          "weeks": 0
+        },
+        {
+          "name": {
+            "vi": "Chờ thêm",
+            "en": "Later"
+          },
+          "x": 550,
+          "weeks": 1
+        }
+      ]
+    },
+    {
+      "id": "p2",
+      "type": "choice",
+      "prompt": {
+        "vi": "Lần này cả hai khoản đều ở xa trong tương lai. Bạn chọn khoản nào?",
+        "en": "This time both payments are far in the future. Which do you choose?"
+      },
+      "options": [
+        {
+          "name": {
+            "vi": "Nhận sớm",
+            "en": "Sooner"
+          },
+          "x": 500,
+          "weeks": 52
+        },
+        {
+          "name": {
+            "vi": "Chờ thêm",
+            "en": "Later"
+          },
+          "x": 550,
+          "weeks": 53
+        }
+      ]
+    }
+  ],
+  "benchmark": {
+    "label": {
+      "vi": "Thaler (1981)",
+      "en": "Thaler (1981)"
+    },
+    "note": {
+      "vi": "Bài gốc hỏi khoản tiền ngang giá với 15 đô la hôm nay; các mức trung vị 20, 50 và 100 đô la khi chờ 1 tháng, 1 năm và 10 năm ứng với lãi suất chiết khấu năm 345%, 120% và 19%: chờ càng xa, người ta càng kiên nhẫn",
+      "en": "The original asked for the amount matching $15 today; medians of $20, $50 and $100 for waits of 1 month, 1 year and 10 years imply annual discount rates of 345%, 120% and 19%: the further away, the more patient"
+    }
+  }
+}
