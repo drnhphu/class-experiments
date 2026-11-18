@@ -145,7 +145,7 @@
         stepNote("Quyền đọc của giảng viên và kho so sánh");
         let count = -1;
         await check("Giảng viên đọc mọi câu trả lời", "allowed", async () => { count = (await getDocsFromServer(collection(sref, "responses"))).size; });
-        row(`Số bản ghi giảng viên thấy: ${count} (kỳ vọng 4: A_T01, B_T01, A_T03, A_Q00)`, "allowed", count === 4 ? "allowed" : `lỗi: ${count}`);
+        row(`Số bản ghi giảng viên thấy: ${count} (kỳ vọng 5: A_T01, B_T01, A_T02, A_T03, A_Q00)`, "allowed", count === 5 ? "allowed" : `lỗi: ${count}`);
         await check("B ghi vào kho so sánh", "denied", () => setDoc(doc(B.db, "archive", "probe"), { x: 1 }));
         await check("B đọc kho so sánh", "denied", () => getDocFromServer(doc(B.db, "archive", "probe")));
 
