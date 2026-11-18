@@ -318,7 +318,9 @@
           const engine = await loadEngine(S.catalog, config.engine);
           const mine = S.store.get().answers?.[exp] || {};
           const score = engine.scoreLocal(mine, config);
-          const node = score == null ? null : engine.renderStudent("__result", config, makeCtx(exp, { score }));
+          // Between-subject experiments show which version this phone got, so pass its condition.
+          const assignment = Array.isArray(config.conditions) ? await assignmentFor(exp, true) : null;
+          const node = score == null ? null : engine.renderStudent("__result", config, makeCtx(exp, { score, assignment }));
           box.replaceChildren(node || el("p", { class: "text-lg" }, S.t("reveal.look")));
         })().catch((e) => box.replaceChildren(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`)));
         return box;

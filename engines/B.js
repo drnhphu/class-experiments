@@ -137,6 +137,7 @@ function renderFramingStep(s, config, ctx) {
 function renderPersonal(config, ctx) {
   const { lang, t } = ctx;
   const cond = ctx.assignment, other = config.conditions.find((c) => c !== cond);
+  if (!config.conditions.includes(cond)) return el("p", { class: "text-lg" }, t("reveal.look"));
   const name = (c) => pick(config.conditionNames[c], lang);
   const lines = [];
   if (config.design === "anchor") {
