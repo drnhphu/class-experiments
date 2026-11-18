@@ -48,6 +48,8 @@
     function show(key, build) {
       if (S.viewKey === key) return;
       S.viewKey = key;
+      (S.viewUnsubs || []).forEach((u) => u()); // listeners of the previous screen (games)
+      S.viewUnsubs = [];
       if (!key.startsWith("collect:")) S.watchKey = null;
       const node = build();
       $("view").replaceChildren(...(node ? [node] : []));
@@ -328,10 +330,22 @@
     }
 
     // ---------- games: intro, open, locked, reveal ----------
+    const card = (node) => el("div", { class: "rounded-xl bg-white p-4 shadow-sm" }, node);
+
+    // Listen to one document while the screen `key` is showing; show() stops it when the screen changes.
+    // A listener recovers by itself after a network gap and replaces a cached copy with the server's.
+    function watchDoc(ref, key, onData) {
+      if (S.viewKey !== key) return; // the screen changed while its engine was loading
+      const unsub = onSnapshot(ref, (snap) => { if (S.viewKey === key) onData(snap.data()); },
+        () => {}); // a refused or failed listen leaves the "loading" text; the next phase draws a new screen
+      (S.viewUnsubs ||= []).push(unsub);
+    }
+
     function showGame(g) {
       const rk = `r${g.round || 1}`;
       const answered = S.store.get().answers?.[g.exp]?.[rk] != null;
-      show(`game:${g.exp}:${g.phase}:${rk}:${answered}`, () => {
+      const key = `game:${g.exp}:${g.phase}:${rk}:${answered}`;
+      show(key, () => {
         const box = el("div", { class: "space-y-3" }, el("p", { class: "text-sm text-slate-500" }, S.t("status.loading")));
         (async () => {
           const config = await loadConfig(S.catalog, g.exp);
@@ -346,22 +360,41 @@
           } else if (g.phase === "open") {
             if (answered) body = el("p", { class: "text-lg" }, S.t("game.waitOthers"));
             else {
-              const assignment = await assignmentFor(g.exp, true);
-              body = engine.renderStudent(rk, config, makeCtx(g.exp, { step: rk, round: g.round || 1, assignment,
-                submit: (answers, times) => {
-                  if (S.store.get().answers?.[g.exp]?.[rk] != null) return;
-                  writeResponse(g.exp, answers, times);
-                  S.viewKey = null; route();
-                } }));
+              // Seats come through a listener, not one read: a failed read, or a stale copy from the
+              // phone's offline cache, cannot leave a seated person on the "no pair yet" screen; the
+              // screen is drawn again only if the seat itself changes.
+              let drawn;
+              watchDoc(doc(db, "sessions", S.code, "assignments", g.exp), key, (a) => {
+                (S.assignCache ||= {})[g.exp] = a ?? null;
+                const assignment = a?.byUid ? (a.byUid[S.uid] ?? null) : (a ?? null);
+                if (drawn !== undefined && assignment === drawn) return;
+                drawn = assignment;
+                box.replaceChildren(head, card(engine.renderStudent(rk, config, makeCtx(g.exp, { step: rk, round: g.round || 1, assignment,
+                  submit: (answers, times) => {
+                    if (S.store.get().answers?.[g.exp]?.[rk] != null) return;
+                    writeResponse(g.exp, answers, times);
+                    S.viewKey = null; route();
+                  } }))));
+              });
+              return;
             }
           } else if (g.phase === "locked") {
             body = el("p", { class: "text-lg" }, S.t("game.locked"));
           } else {
-            const res = await getDoc(doc(db, "sessions", S.code, "results", g.exp)).catch(() => null);
-            body = engine.renderStudent("__result", config, makeCtx(g.exp, { round: g.round || 1, result: res?.data()?.result || null,
-              assignment: await assignmentFor(g.exp, true) })) || el("p", {}, S.t("reveal.look"));
+            // Seat and results through listeners too: the screen is drawn once both are there, and drawn
+            // again if either changes; a copy of an earlier round (offline cache) waits for this round's.
+            let a, r;
+            const draw = () => {
+              if (a === undefined || !r || (r.round ?? 1) !== (g.round || 1)) return;
+              const assignment = a?.byUid ? (a.byUid[S.uid] ?? null) : a;
+              box.replaceChildren(head, card(engine.renderStudent("__result", config, makeCtx(g.exp, { round: g.round || 1, result: r.result || null,
+                assignment })) || el("p", {}, S.t("reveal.look"))));
+            };
+            watchDoc(doc(db, "sessions", S.code, "assignments", g.exp), key, (x) => { a = x ?? null; draw(); });
+            watchDoc(doc(db, "sessions", S.code, "results", g.exp), key, (x) => { r = x; draw(); });
+            return;
           }
-          box.replaceChildren(head, el("div", { class: "rounded-xl bg-white p-4 shadow-sm" }, body));
+          box.replaceChildren(head, card(body));
         })().catch((e) => box.replaceChildren(el("p", { class: "text-rose-700" }, `${S.t("err.load")} (${e.message})`)));
         return box;
       });

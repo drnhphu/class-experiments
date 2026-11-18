@@ -11,13 +11,13 @@ App: `https://drnhphu.github.io/class-experiments/`
 | `join.html` | Trang học viên (điện thoại 360 px): vào phòng, đồng ý (nếu bật), phiên thu theo nhịp từng người, trò chơi bốn pha, kiểm tra nhanh, kết quả cá nhân |
 | `control.html` | Trang giảng viên: tạo hoặc tiếp tục phiên, mở và khóa phiên thu, mở kết quả, điều khiển trò chơi, kiểm tra nhanh, xuất CSV, đóng phiên, xóa dữ liệu thô |
 | `present.html` | Màn chiếu, cửa sổ thứ hai của laptop; không nối Firestore, nhận dữ liệu từ trang điều khiển qua BroadcastChannel |
-| `engines/` | Bốn động cơ A, B, C, D. Đã có: A (lựa chọn trong chủ thể), B (chia điều kiện giữa các nhóm), C (đo và chấm cá nhân) |
+| `engines/` | Bốn động cơ: A (lựa chọn trong chủ thể), B (chia điều kiện giữa các nhóm), C (đo và chấm cá nhân), D (trò chơi trực tiếp, ghép cặp và chia vai) |
 | `experiments/` | Mỗi thí nghiệm một tệp JSON; `index.json` liệt kê các tệp được nạp |
 | `quizzes/` | Bộ kiểm tra nhanh cuối buổi; liệt kê trong `experiments/index.json` |
 | `lang/vi.json`, `lang/en.json` | Mọi chuỗi chữ giao diện |
 | `js/` | Mô-đun dùng chung: Firebase, ngôn ngữ, danh mục và kiểm tra cấu trúc khóa, phiên và thứ tự phiên thu, mã phòng, `viz.js` (thống kê, gộp ô dưới 3 người, bảng ba cột, biểu đồ) |
 | `firestore.rules` | Quy tắc bảo mật; bản trên Firebase console phải khớp tệp này |
-| `tests/` | Động cơ thử T và TD, danh mục thử, `rules.html` (kiểm thử quy tắc), `load.html` (thử tải), `sim.html` (máy giả lập trả lời phiên thu) |
+| `tests/` | Động cơ thử T và TD, danh mục thử, `rules.html` (kiểm thử quy tắc), `load.html` (thử tải), `sim.html` (máy giả lập trả lời phiên thu), `games.html` (máy giả lập chơi trò chơi) |
 
 ## Giao diện chung của động cơ
 
@@ -65,6 +65,20 @@ Mở kết quả một thí nghiệm thì máy chủ không nhận thêm câu tr
 Trên màn chiếu, mọi số liệu hiện dạng tỷ lệ; biểu đồ phân bố gộp nhóm kề nhau đến khi mỗi cột có ít nhất 3 người.
 
 Mọi chữ học viên đọc nằm trong tệp cấu hình; sửa chữ hoặc số thì tăng `version`. Bộ 10 câu của E09 có nguồn kiểm chứng trong từng câu (`source`).
+
+## Trò chơi (Giai đoạn 4, động cơ D)
+
+| Mã | Thiết kế | Khóa câu trả lời trong CSV |
+|---|---|---|
+| E13 | `beauty`: chọn số 0 đến 100, gần 2/3 trung bình nhất thì thắng; cả lớp cùng chơi, không ghép cặp | `r1` = số đã chọn |
+| E14 | `pd`: song tù theo cặp, 1 vòng hoặc lặp đến 5 vòng với cùng người cùng cặp | `r<k>` = `C` (giữ giá) hoặc `D` (giảm giá); cột `assignment` = ghế, ví dụ `c03.A` |
+| E15 | `ultimatum`: Người chia đề nghị, Người nhận nêu mức thấp nhất chấp nhận cùng lúc; sau đó Người chia chơi bản độc tài cùng tổng | Người chia: `r1` = đề nghị, `r1d` = phần cho ở bản độc tài; Người nhận: `r1` = mức thấp nhất; cột `assignment` = ghế, ví dụ `c02.proposer` |
+
+- Ghép cặp: trang điều khiển ghép khi mở lượt chọn đầu tiên và giữ nguyên ghế qua các vòng, kể cả khi lùi pha hoặc kết thúc rồi chọn lại trò chơi đó. Người vào sau nhận ghế ở vòng kế: trước hết là ghế trống cạnh người đang chơi với máy, sau đó ghép với nhau. Người lẻ chơi với máy.
+- Máy: mọi lựa chọn đều đồng thời nên không ai phải chờ bạn chơi. Khi khóa lượt, máy chọn thay cho ghế không có lựa chọn (người lẻ, hoặc người cùng cặp không chọn kịp) theo quy tắc cố định trong tệp cấu hình (`bot`): E14 ăn miếng trả miếng, E15 đề nghị và mức chấp nhận cố định. Lựa chọn của máy không tính vào kết quả của lớp; luật chơi trên điện thoại và màn chiếu báo trước điều này (`botNote`).
+- Điện thoại nhận ghế và kết quả của cặp qua trình nghe (listener) tài liệu `assignments` và `results`, nên khi mạng chập chờn hay bản lưu ngoại tuyến đã cũ, màn hình tự cập nhật khi bản trên máy chủ tới.
+- Quy tắc bảo mật: trong trò chơi, một lần ghi chỉ được thêm khóa của vòng hiện tại (`r<k>`, `r<k>d`), và lựa chọn đã ghi không đổi được.
+- `tests/games.html?room=MÃ`: N máy giả lập vào một phòng thật và chơi các trò chơi mà trang điều khiển đang chạy, qua chính màn hình điện thoại của động cơ; tùy chọn cho một số máy không chọn ở một vòng (`3@E14r1`) và thêm người vào muộn.
 
 ## Dữ liệu trên Firestore
 
