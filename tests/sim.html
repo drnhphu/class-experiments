@@ -8,7 +8,7 @@
 </head>
 <body class="bg-slate-50 text-slate-900 antialiased">
   <!--
-    Phase 2 gate helper: N simulated phones join a real room (opened on control.html) and answer the
+    Phase 2 gate helper (also used for phases 3 and 5): N simulated phones join a real room (opened on control.html) and answer the
     opening batch through the real phone screens of the engines (rendered off-screen, buttons clicked,
     inputs filled). Answers are drawn from a seeded generator, so a run can be repeated. Each phone is a
     named Firebase app with its own anonymous user (same names as tests/load.html, so accounts are reused);
@@ -54,6 +54,9 @@
     // What a simulated person intends to do on one step, given the step's config.
     function intend(r, config, s) {
       const sec = 5 + Math.round(r() * 500) / 10;
+      if (config.design === "decoy") return { by: { base: pickW(r, ["target", "competitor"], [45, 55]), decoy: pickW(r, ["target", "competitor", "decoy"], [58, 35, 7]) }, sec };
+      if (config.design === "default") return { by: { optin: r() < 0.45 ? 1 : 0, optout: r() < 0.8 ? 1 : 0 }, sec };
+      if (config.design === "stroop") return { stroop: { mu: 500 + r() * 200, eff: -20 + r() * 270 }, sec };
       if (s.type === "pricelist") {
         const n = s.sure.length;
         if (r() < 0.12) return { rows: s.sure.map((_, j) => ([0, 1, 2, 5, 6].includes(j) ? "gamble" : "sure")), sec };
@@ -82,23 +85,32 @@
     }
 
     // What the phone displayed tells which condition it showed (compared with the CSV afterwards).
-    function seenCondition(config, text) {
+    function seenCondition(config, node) {
+      const text = node.innerText;
+      if (config.design === "decoy") return node.querySelectorAll("button").length - 1 === 3 ? "decoy" : "base";
+      if (config.design === "default") return node.querySelector("[role=checkbox]")?.getAttribute("aria-checked") === "true" ? "optout" : "optin";
       if (config.design === "anchor") return Object.entries(config.anchors).find(([, a]) => text.includes(`${a.toLocaleString(config.__lang === "en" ? "en-US" : "vi-VN")} `))?.[0] || null;
       if (config.design === "framing") return text.includes(config.__lang === "en" ? "keep their jobs" : "giữ được việc làm") ? "gain" : "loss";
       return null;
     }
 
     // Enter the intended answer through the engine's real phone screen; returns { answers, times, seen }.
-    async function enter(engine, config, step, plan, t, assignment) {
+    async function enter(engine, config, step, plan, t, assignment, r) {
       let clock = Date.now(), captured = null, seen = null;
       const node = engine.renderStudent(step, config, { lang: config.__lang, t, assignment, now: () => clock, submit: (a, tm) => { captured = { a, tm }; } });
       $("stage").replaceChildren(node);
       try {
-        seen = seenCondition(config, node.innerText);
+        seen = seenCondition(config, node);
         const btns = () => [...node.querySelectorAll("button")], ins = () => [...node.querySelectorAll("input")];
         const set = (el, v) => { el.value = String(v); el.dispatchEvent(new Event("input")); };
         const value = plan.by ? plan.by[assignment] : plan.value;
-        if (plan.rows) plan.rows.forEach((v, j) => btns()[2 * j + (v === "sure" ? 0 : 1)].click());
+        if (plan.stroop) return { ...(await doStroop(node, config, plan.stroop, r, () => clock, (ms) => { clock += ms; }, t)), seen };
+        if (config.design === "decoy") {
+          [...node.querySelectorAll("button")].find((b) => b.innerText.includes(config.options[value].name[config.__lang])).click();
+        } else if (config.design === "default") {
+          const box = node.querySelector("[role=checkbox]");
+          if ((value === 1) !== (box.getAttribute("aria-checked") === "true")) box.click();
+        } else if (plan.rows) plan.rows.forEach((v, j) => btns()[2 * j + (v === "sure" ? 0 : 1)].click());
         else if (plan.values) plan.values.forEach(([lo, hi], q) => { set(ins()[2 * q], lo); set(ins()[2 * q + 1], hi); });
         else if (ins().length && value != null) set(ins()[0], value);
         else if (!ins().length) btns()[typeof value === "number" ? value : (value === "more" ? 0 : 1)].click();
@@ -108,6 +120,39 @@
       } finally { $("stage").replaceChildren(); }
       if (!captured) throw new Error(`no answer captured for ${config.id}#${step}`);
       return { ...captured, seen };
+
+      // Stroop: the simulator runs the screen's clock. While the turns run (synchronously, so nothing else
+      // on the page runs meanwhile) the screen's pause timer is fired by hand and the page counts as visible,
+      // so a hidden test tab neither slows the turns nor marks them "away". Each tap comes a planned time
+      // after the word appears, mostly on the ink colour. The planned turns are returned for checking.
+      async function doStroop(node, config, p, r, now, advance, t) {
+        const gauss = () => Math.sqrt(-2 * Math.log(1 - r())) * Math.cos(2 * Math.PI * r());
+        const byName = Object.fromEntries(config.colors.map((c) => [c.name[config.__lang], c.id]));
+        const byInk = Object.fromEntries(config.colors.map((c) => [c.ink.toLowerCase(), c.id]));
+        const ids = config.colors.map((c) => c.id), rec = [], pending = [];
+        const realTimeout = window.setTimeout;
+        window.setTimeout = (fn, ms) => { pending.push({ fn, ms }); return 0; };
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+        try {
+          [...node.querySelectorAll("button")].find((b) => b.innerText.trim() === t("c.stroopStart")).click();
+          for (let k = 0; !captured && k < 500; k++) {
+            const tm = pending.shift();
+            if (!tm) throw new Error("Stroop screen stopped");
+            advance(tm.ms); tm.fn();
+            const w = node.querySelector("p.text-5xl");
+            const rgb = w.style.color.match(/\d+/g).map(Number), hex = "#" + rgb.slice(0, 3).map((x) => x.toString(16).padStart(2, "0")).join("");
+            const ink = byInk[hex], word = byName[w.textContent], cong = ink === word;
+            if (!ink || !word) throw new Error(`Stroop word not read: ${w.textContent} ${hex}`);
+            const resp = r() < (cong ? 0.96 : 0.9) ? ink : ids.filter((x) => x !== ink)[Math.floor(r() * (ids.length - 1))];
+            const rt = Math.max(150, Math.round(p.mu + (cong ? 0 : p.eff) + 60 * gauss()));
+            advance(rt);
+            node.querySelector(`[data-color="${resp}"]`).click();
+            rec.push({ c: cong ? 1 : 0, ink, word, resp, rt });
+          }
+        } finally { window.setTimeout = realTimeout; delete document.hidden; }
+        if (!captured) throw new Error("Stroop gave no answer");
+        return { ...captured, planned: rec };
+      }
     }
 
     // Condition given by the instructor's page (engine B); waits up to 30 s for it.
@@ -138,7 +183,7 @@
       return p;
     }
 
-    window.__seen = {};
+    window.__seen = {}; window.__plan = {};
     $("joinOnly").onclick = async () => {
       $("joinOnly").disabled = true;
       try {
@@ -173,8 +218,10 @@
             if (i === N && r() < 0.5 && written > 3) break; // last phone leaves early
             try {
               const assignment = Array.isArray(config.conditions) ? await conditionOf(ldb, code, exp, uid) : null;
-              const { a: answers, tm: times, seen } = await enter(engine, config, step, intend(r, config, st), t, assignment);
+              const plan = intend(r, config, st);
+              const { a: answers, tm: times, seen, planned } = await enter(engine, config, step, plan, t, assignment, r);
               if (seen) { window.__seen[`${uid}|${exp}`] = seen; row.children[3].textContent += `${exp}:${seen} `; }
+              window.__plan[`${uid}|${exp}#${step}`] = planned ?? (plan.by ? plan.by[assignment] : plan.value ?? null);
               const payload = { uid, exp, answers, times, updatedAt: lite.serverTimestamp() };
               if (s.consent) payload.consent = null;
               await lite.setDoc(lite.doc(ldb, "sessions", code, "responses", responseId(uid, exp)), payload, { merge: true });
